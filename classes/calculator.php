@@ -16,6 +16,78 @@ use grade_item;
 class calculator {
     public const MIN_AXES = 3;
 
+    /**
+     * Max points from activity settings (e.g. quiz "Оцениваемый балл"), not only grade_item row.
+     *
+     * @return float[]|null [grademin, grademax] or null to use generic logic
+     */
+    protected static function get_activity_grade_range(grade_item $gi): ?array {
+        global $DB;
+        if ($gi->itemtype !== 'mod' || empty($gi->itemmodule) || empty($gi->iteminstance)) {
+            return null;
+        }
+        $id = (int) $gi->iteminstance;
+        if ($gi->itemmodule === 'quiz') {
+            $rec = $DB->get_record('quiz', ['id' => $id], 'grade');
+            if ($rec && (float) $rec->grade > 0) {
+                return [0.0, (float) $rec->grade];
+            }
+        } else if ($gi->itemmodule === 'assign') {
+            $rec = $DB->get_record('assign', ['id' => $id], 'grade');
+            if ($rec && (float) $rec->grade > 0) {
+                return [0.0, (float) $rec->grade];
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Percent 0–100: (полученный балл − min) / (max − min) × 100.
+     * For quiz/assign uses max from activity; otherwise raw range or grade_item scale.
+     */
+    protected static function grade_percent_from_grade(grade_grade $grade, grade_item $gradeitem): ?float {
+        $activityrange = self::get_activity_grade_range($gradeitem);
+        if ($activityrange !== null) {
+            $gmin = $activityrange[0];
+            $gmax = $activityrange[1];
+            $grange = $gmax - $gmin;
+            if ($grange <= 0.0) {
+                return null;
+            }
+            if ($grade->rawgrade !== null) {
+                return (((float) $grade->rawgrade - $gmin) / $grange) * 100.0;
+            }
+            if ($grade->finalgrade !== null) {
+                return (((float) $grade->finalgrade - $gmin) / $grange) * 100.0;
+            }
+            return null;
+        }
+
+        $gmin = (float) $gradeitem->grademin;
+        $gmax = (float) $gradeitem->grademax;
+        $grange = $gmax - $gmin;
+
+        if ($grade->rawgrade !== null) {
+            $rmin = (float) $grade->rawgrademin;
+            $rmax = (float) $grade->rawgrademax;
+            $imax = (float) $gradeitem->grademax;
+            $rawmaxlooksdefault = abs($rmax - 100.0) < 0.01 && abs($imax - 100.0) > 0.5;
+            if ($rmax > $rmin && !$rawmaxlooksdefault) {
+                return (((float) $grade->rawgrade - $rmin) / ($rmax - $rmin)) * 100.0;
+            }
+            if ($rawmaxlooksdefault && $grange > 0.0) {
+                return (((float) $grade->rawgrade - $gmin) / $grange) * 100.0;
+            }
+        }
+        if ($grade->finalgrade === null) {
+            return null;
+        }
+        if ($grange <= 0.0) {
+            return null;
+        }
+        return (((float) $grade->finalgrade - $gmin) / $grange) * 100.0;
+    }
+
     public static function build_payload(int $courseid, int $userid, bool $withcourseavg = false): array {
         $config = manager::get_course_config($courseid);
         $definitions = manager::get_definitions($courseid);
@@ -28,7 +100,7 @@ class calculator {
         $payload = [
             'skills' => self::build_skills_map($detail),
             'skills_detail' => $detail,
-            'mapping_meta' => self::build_mapping_meta($definitions, $mappings),
+            'mapping_meta' => self::build_mapping_meta($courseid, $definitions, $mappings),
             'chart' => $chart,
             'overall' => $overall,
             'config' => [
@@ -77,12 +149,12 @@ class calculator {
 
             $rows[$mapping->skill_key]['items']++;
             $gradeitem = grade_item::fetch(['id' => $mapping->gradeitemid, 'courseid' => $courseid]);
-            if (!$gradeitem || (float)$gradeitem->grademax <= 0.0) {
+            if (!$gradeitem) {
                 continue;
             }
 
             $grade = grade_grade::fetch(['itemid' => $gradeitem->id, 'userid' => $userid]);
-            if (!$grade || $grade->finalgrade === null) {
+            if (!$grade) {
                 continue;
             }
 
@@ -91,7 +163,10 @@ class calculator {
                 continue;
             }
 
-            $normalized = ((float)$grade->finalgrade / (float)$gradeitem->grademax) * 100.0;
+            $normalized = self::grade_percent_from_grade($grade, $gradeitem);
+            if ($normalized === null) {
+                continue;
+            }
             $rows[$mapping->skill_key]['weighted'] += $normalized * $weight;
             $rows[$mapping->skill_key]['weightsum'] += $weight;
         }
@@ -153,7 +228,8 @@ class calculator {
         ];
     }
 
-    protected static function build_mapping_meta(array $definitions, array $mappings): array {
+    protected static function build_mapping_meta(int $courseid, array $definitions, array $mappings): array {
+        global $DB;
         $meta = [];
         foreach ($definitions as $definition) {
             $meta[$definition->skill_key] = [
@@ -173,9 +249,47 @@ class calculator {
                     'items' => [],
                 ];
             }
+            $gi = grade_item::fetch(['id' => $mapping->gradeitemid, 'courseid' => $courseid]);
+            if (!$gi) {
+                continue;
+            }
+            $activityrange = self::get_activity_grade_range($gi);
+            if ($activityrange !== null) {
+                $gmin = $activityrange[0];
+                $gmax = $activityrange[1];
+            } else {
+                // Grader cell: raw points; sample range from grade_grades when useful.
+                $sample = $DB->get_record_sql(
+                    "SELECT rawgrademin, rawgrademax
+                       FROM {grade_grades}
+                      WHERE itemid = ?
+                        AND rawgrademax > rawgrademin
+                   ORDER BY timemodified DESC
+                      LIMIT 1",
+                    [$mapping->gradeitemid]
+                );
+                $gmin = (float) $gi->grademin;
+                $gmax = (float) $gi->grademax;
+                if ($sample) {
+                    $rmin = (float) $sample->rawgrademin;
+                    $rmax = (float) $sample->rawgrademax;
+                    $imax = (float) $gi->grademax;
+                    $rawmaxlooksdefault = abs($rmax - 100.0) < 0.01 && abs($imax - 100.0) > 0.5;
+                    if ($rmax > $rmin && !$rawmaxlooksdefault) {
+                        $gmin = $rmin;
+                        $gmax = $rmax;
+                    }
+                }
+            }
+            $grange = $gmax - $gmin;
+            if ($grange <= 0.0) {
+                $gmax = $gmin + 1.0;
+            }
             $meta[$mapping->skill_key]['items'][] = [
                 'gradeitemid' => (int)$mapping->gradeitemid,
                 'weight' => (float)$mapping->weight,
+                'grademin' => $gmin,
+                'grademax' => $gmax,
             ];
         }
 
@@ -186,21 +300,25 @@ class calculator {
         $percent = null;
         if (($config->overallmode ?? 'average') === 'final') {
             $courseitem = grade_item::fetch_course_item($courseid);
-            if ($courseitem && (float)$courseitem->grademax > 0) {
+            if ($courseitem) {
                 $grade = grade_grade::fetch(['itemid' => $courseitem->id, 'userid' => $userid]);
-                if ($grade && $grade->finalgrade !== null) {
-                    $percent = round((((float)$grade->finalgrade / (float)$courseitem->grademax) * 100.0), 2);
+                if ($grade && ($grade->finalgrade !== null || $grade->rawgrade !== null)) {
+                    $pct = self::grade_percent_from_grade($grade, $courseitem);
+                    if ($pct !== null) {
+                        $percent = round($pct, 2);
+                    }
                 }
             }
         } else {
+            // Average mode: sum(values) / count(skills), counting null as 0 (all defined skills participate).
             $values = [];
             foreach ($detail as $row) {
-                if ($row['placeholder'] || $row['value'] === null) {
+                if (!empty($row['placeholder'])) {
                     continue;
                 }
-                $values[] = (float)$row['value'];
+                $values[] = $row['value'] === null ? 0.0 : (float) $row['value'];
             }
-            if ($values) {
+            if ($values !== []) {
                 $percent = round(array_sum($values) / count($values), 2);
             }
         }

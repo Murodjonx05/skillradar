@@ -18,10 +18,12 @@ $PAGE->set_heading($course->fullname);
 $PAGE->set_title(get_string('manageheading', 'local_skillradar'));
 
 $assetrev = (string)max(
+    @filemtime(__DIR__ . '/js/chart.umd.min.js') ?: 0,
     @filemtime(__DIR__ . '/js/manage.js') ?: 0,
     @filemtime(__DIR__ . '/styles/radar.css') ?: 0
 );
 $PAGE->requires->css(new moodle_url('/local/skillradar/styles/radar.css', ['v' => $assetrev]));
+$PAGE->requires->js(new moodle_url('/local/skillradar/js/chart.umd.min.js', ['v' => $assetrev]), true);
 $PAGE->requires->js(new moodle_url('/local/skillradar/js/manage.js', ['v' => $assetrev]), true);
 
 global $DB, $OUTPUT;
@@ -218,6 +220,19 @@ if ($unmapped) {
 
 echo html_writer::tag('h3', get_string('preview', 'local_skillradar'));
 echo html_writer::div(
+    html_writer::div(
+        html_writer::tag('canvas', '', ['id' => 'local-skillradar-manage-canvas']) .
+        html_writer::div(
+            html_writer::div(
+                html_writer::div('0%', 'local-skillradar-score-value', ['id' => 'local-skillradar-manage-score-value']) .
+                html_writer::div('AVERAGE', 'local-skillradar-score-label', ['id' => 'local-skillradar-manage-score-label']),
+                'local-skillradar-center-score',
+                ['id' => 'local-skillradar-manage-center-score', 'title' => 'Toggle score mode']
+            ),
+            'local-skillradar-center-anchor'
+        ),
+        'local-skillradar-chartwrap'
+    ) .
     html_writer::div(get_string('loading', 'local_skillradar'), 'local-skillradar-manage-loading', ['id' => 'local-skillradar-manage-loading']) .
     html_writer::div('', 'local-skillradar-results', ['id' => 'local-skillradar-manage-results']) .
     html_writer::div('', 'local-skillradar-textdebug', ['id' => 'local-skillradar-manage-text']) .

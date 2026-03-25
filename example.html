@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Perfect Center Radar</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      padding: 24px;
+      font-family: Arial, sans-serif;
+      background: #fff;
+    }
+
+    .chart-wrapper {
+      position: relative;
+      width: 600px;
+      height: 600px;
+      margin: 0 auto;
+    }
+
+    canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+
+    .center-score {
+      position: absolute;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: none;
+      border: none;
+      box-shadow: none;
+      border-radius: 0;
+      padding: 0;
+      margin: 0;
+      min-width: 0;
+      min-height: 0;
+      text-align: center;
+      user-select: none;
+      cursor: pointer;
+      z-index: 10;
+      transform: translate(-50%, -50%);
+      line-height: 1;
+      pointer-events: auto;
+    }
+
+    .score-value {
+      font-size: 34px;
+      font-weight: 800;
+      line-height: 1;
+      color: rgba(54, 162, 235, 1);
+      white-space: nowrap;
+      margin: 0;
+      padding: 0;
+    }
+
+    .score-label {
+      margin-top: 6px;
+      font-size: 11px;
+      font-weight: 700;
+      line-height: 1;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: rgba(54, 162, 235, 0.72);
+      white-space: nowrap;
+      padding: 0;
+    }
+
+    .center-score.rank-mode .score-value {
+      font-size: 42px;
+      letter-spacing: 0.02em;
+    }
+
+    .center-score.rank-mode .score-label {
+      font-size: 10px;
+      margin-top: 5px;
+    }
+  </style>
+</head>
+<body>
+
+<div class="chart-wrapper">
+  <canvas id="skillsChart"></canvas>
+
+  <div id="centerScoreBtn" class="center-score" title="Нажми для переключения">
+    <div id="scoreValue" class="score-value">0</div>
+    <div id="scoreLabel" class="score-label">Оценка</div>
+  </div>
+</div>
+
+<script>
+  const skillsLabels = [
+    'Python (Django/FastAPI)',
+    'React / JavaScript',
+    'Rust',
+    'Git',
+    'Системная архитектура',
+    'DevOps'
+  ];
+
+  const skillsData = [95, 80, 45, 85, 70, 60];
+
+  const totalScore = skillsData.reduce((acc, curr) => acc + curr, 0);
+  const averagePercent = Math.round(totalScore / skillsData.length);
+
+  function getRank(percent) {
+    if (percent >= 95) return 'S+';
+    if (percent >= 90) return 'S';
+    if (percent >= 85) return 'S-';
+    if (percent >= 80) return 'A+';
+    if (percent >= 75) return 'A';
+    if (percent >= 70) return 'A-';
+    if (percent >= 65) return 'B+';
+    if (percent >= 60) return 'B';
+    if (percent >= 55) return 'B-';
+    if (percent >= 50) return 'C+';
+    if (percent >= 40) return 'C';
+    if (percent >= 30) return 'D';
+    if (percent >= 15) return 'E+';
+    if (percent >= 5) return 'E';
+    return 'E-';
+  }
+
+  const scoreBtn = document.getElementById('centerScoreBtn');
+  const scoreValueDisplay = document.getElementById('scoreValue');
+  const scoreLabelDisplay = document.getElementById('scoreLabel');
+
+  let showPercentage = true;
+
+  function renderCenterScore() {
+    if (showPercentage) {
+      scoreBtn.classList.remove('rank-mode');
+      scoreValueDisplay.textContent = `${averagePercent}%`;
+      scoreLabelDisplay.textContent = 'AVERAGE';
+    } else {
+      scoreBtn.classList.add('rank-mode');
+      scoreValueDisplay.textContent = getRank(averagePercent);
+      scoreLabelDisplay.textContent = 'ОЦЕНКА';
+    }
+  }
+
+  renderCenterScore();
+
+  scoreBtn.addEventListener('click', () => {
+    showPercentage = !showPercentage;
+    renderCenterScore();
+  });
+
+  const centerHtmlPlugin = {
+    id: 'centerHtmlPlugin',
+    afterDraw(chart, args, pluginOptions) {
+      const el = document.getElementById(pluginOptions.elementId);
+      const scale = chart.scales.r;
+
+      if (!el || !scale) return;
+
+      el.style.left = `${scale.xCenter}px`;
+      el.style.top = `${scale.yCenter}px`;
+    }
+  };
+
+  const ctx = document.getElementById('skillsChart').getContext('2d');
+
+  new Chart(ctx, {
+    type: 'radar',
+    data: {
+      labels: skillsLabels,
+      datasets: [{
+        label: 'Уровень владения (%)',
+        data: skillsData,
+        backgroundColor: 'rgba(54, 162, 235, 0.22)',
+        borderColor: 'rgba(54, 162, 235, 1)',
+        pointBackgroundColor: 'rgba(54, 162, 235, 1)',
+        pointBorderColor: '#fff',
+        pointHoverBackgroundColor: '#fff',
+        pointHoverBorderColor: 'rgba(54, 162, 235, 1)',
+        pointRadius: 3,
+        pointHoverRadius: 4,
+        borderWidth: 2.4,
+        tension: 0.32,
+        fill: true
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      layout: {
+        padding: {
+          top: 8,
+          right: 8,
+          bottom: 8,
+          left: 8
+        }
+      },
+      plugins: {
+        centerHtmlPlugin: {
+          elementId: 'centerScoreBtn'
+        },
+        legend: {
+          position: 'top',
+          labels: {
+            boxWidth: 18,
+            boxHeight: 10,
+            padding: 18
+          }
+        },
+        tooltip: {
+          callbacks: {
+            label: function(context) {
+              let label = context.dataset.label || '';
+              if (label) label += ': ';
+              if (context.parsed.r !== null) {
+                label += `${context.parsed.r}% (${getRank(context.parsed.r)})`;
+              }
+              return label;
+            }
+          }
+        }
+      },
+      scales: {
+        r: {
+          min: 0,
+          max: 100,
+          ticks: {
+            display: false,
+            stepSize: 20
+          },
+          angleLines: {
+            color: 'rgba(0, 0, 0, 0.08)'
+          },
+          grid: {
+            color: 'rgba(0, 0, 0, 0.08)',
+            circular: true
+          },
+          pointLabels: {
+            font: {
+              size: 13,
+              weight: '600'
+            },
+            color: '#333',
+            padding: 8
+          }
+        }
+      },
+      animation: {
+        duration: 700
+      }
+    },
+    plugins: [centerHtmlPlugin]
+  });
+</script>
+
+</body>
+</html>
