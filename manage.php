@@ -113,6 +113,7 @@ $previewconfig = [
     'primaryColor' => $cfg->primarycolor ?? '#3B82F6',
     'apiUrl' => (new moodle_url('/local/skillradar/api.php'))->out(false),
     'sesskey' => sesskey(),
+    'includeCourseAverage' => !empty($cfg->courseavg),
     'debugSkillRadar' => $debugskillradar,
     'strings' => [
         'loading' => get_string('loading', 'local_skillradar'),
@@ -122,6 +123,7 @@ $previewconfig = [
         'resultBreakdown' => get_string('resultbreakdown', 'local_skillradar'),
         'noResults' => get_string('noresults', 'local_skillradar'),
         'mappedItems' => get_string('mappeditems', 'local_skillradar'),
+        'courseAverageLegend' => get_string('courseaveragelegend', 'local_skillradar'),
     ],
 ];
 

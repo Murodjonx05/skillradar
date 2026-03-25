@@ -13,6 +13,9 @@ class manager {
     public const TABLE_DEF = 'local_skillradar_def';
     public const TABLE_CFG = 'local_skillradar_cfg';
 
+    /** @var string Application cache key prefix for per-course payload revision (invalidates course without purging all sites). */
+    private const CACHE_REV_PREFIX = 'skillradar_rev_';
+
     public static function get_course_config(int $courseid): stdClass {
         global $DB;
         $record = $DB->get_record(self::TABLE_CFG, ['courseid' => $courseid]);
@@ -100,17 +103,31 @@ class manager {
 
     public static function invalidate_course_cache(int $courseid): void {
         $cache = cache::make('local_skillradar', 'skillpayload');
-        $cache->purge();
+        $cache->set(self::CACHE_REV_PREFIX . $courseid, time());
     }
 
     public static function invalidate_user_cache(int $courseid, int $userid): void {
         $cache = cache::make('local_skillradar', 'skillpayload');
-        $cache->delete(self::cache_key($courseid, $userid));
-        $cache->delete(self::cache_key($courseid, $userid) . '_avg');
+        $base = self::cache_key($courseid, $userid);
+        $cache->delete($base);
+        $cache->delete($base . '_avg');
+    }
+
+    /**
+     * Revision token so mapping/config changes for one course do not require purging the whole store.
+     */
+    protected static function course_payload_revision(int $courseid): int {
+        $cache = cache::make('local_skillradar', 'skillpayload');
+        $rev = $cache->get(self::CACHE_REV_PREFIX . $courseid);
+        if ($rev === false) {
+            return 0;
+        }
+        return (int) $rev;
     }
 
     public static function cache_key(int $courseid, int $userid): string {
-        return 'c' . $courseid . '_u' . $userid;
+        $r = self::course_payload_revision($courseid);
+        return 'c' . $courseid . '_r' . $r . '_u' . $userid;
     }
 
     /**

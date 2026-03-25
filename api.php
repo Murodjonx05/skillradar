@@ -15,6 +15,18 @@ $withavg = optional_param('courseavg', 0, PARAM_BOOL);
 $course = get_course($courseid);
 $context = context_course::instance($courseid);
 
+// User report "all users" mode uses userid=0 — no single-user payload (avoid core_user::get_user(0)).
+if ($userid < 1) {
+    header('Content-Type: application/json; charset=utf-8');
+    echo json_encode([
+        'error' => 'no_user_selected',
+        'strings' => [
+            'notConfigured' => get_string('notconfigured', 'local_skillradar'),
+        ],
+    ]);
+    exit;
+}
+
 // Access control aligned with Moodle grade viewing (see gradereport/user/classes/external/user.php).
 if ((int) $userid !== (int) $USER->id) {
     if (!has_capability('local/skillradar:manage', $context)) {

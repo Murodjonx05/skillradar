@@ -245,7 +245,8 @@
             return;
         }
         var percent = payload.overall && payload.overall.percent !== null ? payload.overall.percent : null;
-        var letter = getRank(percent);
+        var backendLetter = payload.overall && payload.overall.letter;
+        var letter = (typeof backendLetter === 'string' && backendLetter.length > 0) ? backendLetter : getRank(percent);
         if (showPercentage) {
             buttonNode.classList.remove('rank-mode');
             valueNode.textContent = percent === null ? '—' : Math.round(percent) + '%';
@@ -389,9 +390,27 @@
             });
         }
 
+        function clearChartWhenNoUser() {
+            if (chartInstance) {
+                chartInstance.destroy();
+                chartInstance = null;
+            }
+            if (centerValue) {
+                centerValue.textContent = '—';
+            }
+            if (centerLabel) {
+                centerLabel.textContent = 'AVERAGE';
+            }
+            if (centerButton) {
+                centerButton.classList.remove('rank-mode');
+            }
+            showPercentage = true;
+        }
+
         function load(userId) {
             if (!userId) {
                 lastPayload = null;
+                clearChartWhenNoUser();
                 if (results) {
                     results.innerHTML = '<p class="local-skillradar-results-empty">' +
                         ((config.strings && config.strings.selectStudent) || 'Select student') + '</p>';
@@ -432,7 +451,9 @@
             });
         }
 
-        load(config.userId > 0 ? config.userId : findFirstGraderUserId());
+        var initialUserId = config.userId > 0 ? config.userId :
+            (config.reportType === 'grader' ? findFirstGraderUserId() : 0);
+        load(initialUserId);
 
         document.addEventListener('click', function(event) {
             var row = event.target.closest('tr.userrow[data-uid]');

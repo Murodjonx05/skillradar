@@ -244,6 +244,9 @@
         params.set('courseid', String(config.courseId));
         params.set('userid', String(config.userId));
         params.set('sesskey', config.sesskey);
+        if (config.includeCourseAverage) {
+            params.set('courseavg', '1');
+        }
         return fetch(config.apiUrl + '?' + params.toString(), {credentials: 'same-origin'}).then(function(response) {
             if (!response.ok) {
                 throw new Error('skillradar_http_' + response.status);
@@ -271,7 +274,7 @@
 
         var chartVals = payload.chart && payload.chart.values ? payload.chart.values : [];
         var solid = hexToRgba(primary, 1);
-        return [{
+        var datasets = [{
             label: 'Skill level (%)',
             data: chartVals.map(function(value) {
                 return value === null ? 0 : value;
@@ -294,6 +297,33 @@
             radarWaveAmp: 0.034,
             radarWaveShadowColor: hasUserValues ? solid : undefined
         }];
+
+        if (payload.course_average && payload.course_average.values) {
+            var avgVals = payload.course_average.values;
+            datasets.push({
+                label: payload.course_average.label ||
+                    ((payload.strings && payload.strings.courseAverageLegend) || 'Course average'),
+                data: avgVals.map(function(value) {
+                    return value === null ? 0 : value;
+                }),
+                radarArcSegments: true,
+                radarArcStrokeWidth: 1.8,
+                radarWaveAmp: 0.022,
+                radarWaveGlowAlpha: 0.55,
+                radarWaveShadowBlur: 8,
+                backgroundColor: 'rgba(100, 116, 139, 0.08)',
+                borderColor: 'rgba(100, 116, 139, 0.9)',
+                pointBackgroundColor: 'rgba(100, 116, 139, 0.9)',
+                pointBorderColor: '#fff',
+                pointRadius: 4,
+                pointHoverRadius: 5,
+                borderWidth: 0,
+                fill: false,
+                tension: 0
+            });
+        }
+
+        return datasets;
     }
 
     function updateCenterScore(payload, valueNode, labelNode, buttonNode) {
@@ -301,7 +331,8 @@
             return;
         }
         var percent = payload.overall && payload.overall.percent !== null ? payload.overall.percent : null;
-        var letter = getRank(percent);
+        var backendLetter = payload.overall && payload.overall.letter;
+        var letter = (typeof backendLetter === 'string' && backendLetter.length > 0) ? backendLetter : getRank(percent);
         if (showPercentage) {
             buttonNode.classList.remove('rank-mode');
             valueNode.textContent = percent === null ? '—' : Math.round(percent) + '%';

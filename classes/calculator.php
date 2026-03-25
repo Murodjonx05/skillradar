@@ -301,6 +301,8 @@ class calculator {
 
     protected static function compute_overall(int $courseid, int $userid, \stdClass $config, array $detail): array {
         $percent = null;
+        $letter = '';
+
         if (($config->overallmode ?? 'average') === 'final') {
             $courseitem = grade_item::fetch_course_item($courseid);
             if ($courseitem) {
@@ -310,10 +312,24 @@ class calculator {
                     if ($pct !== null) {
                         $percent = round($pct, 2);
                     }
+                    $rawval = $grade->finalgrade;
+                    if ($rawval === null) {
+                        $rawval = $grade->rawgrade;
+                    }
+                    if ($rawval !== null) {
+                        $moodleletter = \grade_format_gradevalue_letter((float) $rawval, $courseitem);
+                        $moodleletter = trim((string) $moodleletter);
+                        if ($moodleletter !== '' && $moodleletter !== '-') {
+                            $letter = $moodleletter;
+                        }
+                    }
                 }
             }
+            if ($letter === '' && $percent !== null) {
+                $letter = self::percent_to_letter($percent);
+            }
         } else {
-            // Average mode: mean of skills that have a grade (non-null); unmapped/ungraded skills are excluded.
+            // Average mode: mean of skills that have a grade (non-null); ungraded axes are excluded.
             $nonempty = [];
             foreach ($detail as $row) {
                 if (!empty($row['placeholder'])) {
@@ -327,11 +343,12 @@ class calculator {
             if ($nonempty !== []) {
                 $percent = round(array_sum($nonempty) / count($nonempty), 2);
             }
+            $letter = self::percent_to_letter($percent);
         }
 
         return [
             'percent' => $percent,
-            'letter' => self::percent_to_letter($percent),
+            'letter' => $letter,
         ];
     }
 
