@@ -7,6 +7,13 @@
     var chartInstance = null;
     var showPercentage = true;
 
+    /**
+     * Radial axis: min < 0 so 0% maps to an inner ring, not the geometric center.
+     * Lines for low scores stay outside the center score label; zeros remain visible as points on that ring.
+     */
+    var RADAR_R_MIN = -20;
+    var RADAR_R_MAX = 100;
+
     function readConfig(root) {
         try {
             return JSON.parse(root.getAttribute('data-config') || '{}');
@@ -326,8 +333,8 @@
                 },
                 scales: {
                     r: {
-                        min: 0,
-                        max: 100,
+                        min: RADAR_R_MIN,
+                        max: RADAR_R_MAX,
                         ticks: {
                             display: false,
                             stepSize: 20

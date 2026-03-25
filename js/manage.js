@@ -7,6 +7,10 @@
     var chartInstance = null;
     var showPercentage = true;
 
+    /** Match script.js: 0% on inner ring, not at center (room for center score label). */
+    var RADAR_R_MIN = -20;
+    var RADAR_R_MAX = 100;
+
     function readConfig(root) {
         try {
             return JSON.parse(root.getAttribute('data-config') || '{}');
@@ -411,8 +415,8 @@
                 },
                 scales: {
                     r: {
-                        min: 0,
-                        max: 100,
+                        min: RADAR_R_MIN,
+                        max: RADAR_R_MAX,
                         ticks: {
                             display: false,
                             stepSize: 20
