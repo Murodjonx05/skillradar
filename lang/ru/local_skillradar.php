@@ -39,6 +39,7 @@ $string['managechartmissing'] = 'Chart.js не загрузился.';
 $string['graderselectstudent'] = 'Выберите студента для загрузки радара.';
 $string['resultbreakdown'] = 'Расшифровка результатов';
 $string['noresults'] = 'Пока нет оценённых навыков.';
+$string['fetcherror'] = 'Не удалось загрузить Skill Radar. Обновите страницу.';
 $string['courseaveragelegend'] = 'Среднее по курсу';
 $string['mappeditems'] = 'элементов';
 $string['warning'] = 'Предупреждение';

@@ -208,7 +208,7 @@
                 '<span class="local-skillradar-result-dot" style="background:' + row.color + ';"></span>' +
                 '<span class="local-skillradar-result-label">' + row.label + '</span>' +
                 '<span class="local-skillradar-result-value">' +
-                (row.value === null ? '0%' : row.value.toFixed(2) + '%') +
+                (row.value === null ? '—' : row.value.toFixed(2) + '%') +
                 '<span class="local-skillradar-result-meta">' + row.items + ' ' +
                 (((payload.strings && payload.strings.mappedItems) || 'mapped')) +
                 '</span></span>' +
@@ -229,7 +229,7 @@
         }
         container.innerHTML = rows.map(function(row) {
             return '<p><strong>' + row.label + '</strong>: ' +
-                (row.value === null ? '0%' : row.value.toFixed(2) + '%') +
+                (row.value === null ? '—' : row.value.toFixed(2) + '%') +
                 ' | items=' + row.items +
                 ' | empty=' + (row.empty ? 'true' : 'false') +
                 ' | placeholder=' + (row.placeholder ? 'true' : 'false') +

@@ -39,6 +39,7 @@ $string['managechartmissing'] = 'Chart.js did not load.';
 $string['graderselectstudent'] = 'Select a student to load the radar.';
 $string['resultbreakdown'] = 'Result breakdown';
 $string['noresults'] = 'No graded skills yet.';
+$string['fetcherror'] = 'Could not load Skill Radar. Try refreshing the page.';
 $string['courseaveragelegend'] = 'Course average';
 $string['mappeditems'] = 'mapped';
 $string['warning'] = 'Warning';

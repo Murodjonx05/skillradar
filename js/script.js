@@ -373,6 +373,10 @@
         if (!panel) {
             return;
         }
+        if (panel.getAttribute('data-sr-booted') === '1') {
+            return;
+        }
+        panel.setAttribute('data-sr-booted', '1');
         var config = readConfig(panel);
         if (!config) {
             return;
@@ -428,6 +432,9 @@
                 return;
             }
             fetchPayload(config.apiUrl, config.courseId, userId, config.sesskey, true).then(function(payload) {
+                if (payload && payload.error) {
+                    throw new Error(payload.error);
+                }
                 payload.strings = Object.assign({}, config.strings || {}, payload.strings || {});
                 lastPayload = payload;
                 applyPrimaryColor(panel, resolvePrimaryColor(payload, config.primaryColor));
@@ -447,7 +454,11 @@
                 return payload;
             }).catch(function() {
                 lastPayload = null;
-                renderResults(results, {'skills_detail': [], strings: config.strings || {}});
+                clearChartWhenNoUser();
+                if (results) {
+                    results.innerHTML = '<p class="local-skillradar-results-empty">' +
+                        ((config.strings && config.strings.fetchError) || 'Could not load Skill Radar.') + '</p>';
+                }
                 if (config.debugSkillRadar) {
                     renderTextDebug(textdebug, {'skills_detail': []});
                     renderJsonDebug(jsondebug, {
@@ -458,8 +469,12 @@
             });
         }
 
-        var initialUserId = config.userId > 0 ? config.userId :
-            (config.reportType === 'grader' ? findFirstGraderUserId() : 0);
+        var initialUserId = 0;
+        if (config.userId > 0) {
+            initialUserId = config.userId;
+        } else if (config.reportType === 'grader') {
+            initialUserId = findFirstGraderUserId();
+        }
         load(initialUserId);
 
         document.addEventListener('click', function(event) {

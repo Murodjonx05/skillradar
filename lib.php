@@ -156,6 +156,7 @@ function local_skillradar_before_footer() {
             'resultBreakdown' => get_string('resultbreakdown', 'local_skillradar'),
             'noResults' => get_string('noresults', 'local_skillradar'),
             'courseAverageLegend' => get_string('courseaveragelegend', 'local_skillradar'),
+            'fetchError' => get_string('fetcherror', 'local_skillradar'),
         ],
         'debugSkillRadar' => $debugskillradar,
     ];
