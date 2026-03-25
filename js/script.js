@@ -136,143 +136,6 @@
         });
     }
 
-    /**
-     * Parse numeric grade from grader cell (ball / raw), not yet a percentage.
-     * @param {string} raw
-     * @returns {number|null}
-     */
-    function parseGradeCellString(raw) {
-        if (typeof raw !== 'string') {
-            return null;
-        }
-        var normalized = raw.replace(/\s+/g, '').replace(',', '.');
-        if (!normalized || normalized === '-' || normalized === '—') {
-            return null;
-        }
-        var value = parseFloat(normalized);
-        return isNaN(value) ? null : value;
-    }
-
-    /**
-     * @param {number|null|undefined} raw
-     * @param {number|null|undefined} grademin
-     * @param {number|null|undefined} grademax
-     * @returns {number|null}
-     */
-    function rawGradeToPercent(raw, grademin, grademax) {
-        if (raw === null || typeof raw === 'undefined' || isNaN(raw)) {
-            return null;
-        }
-        var gmin = (grademin === null || grademin === undefined) ? 0 : Number(grademin);
-        gmin = isNaN(gmin) ? 0 : gmin;
-        var gmax = (grademax === null || grademax === undefined) ? 100 : Number(grademax);
-        gmax = isNaN(gmax) ? 100 : gmax;
-        var grange = gmax - gmin;
-        if (grange <= 0) {
-            return null;
-        }
-        return ((Number(raw) - gmin) / grange) * 100;
-    }
-
-    function getGradeCellRaw(row, gradeItemId) {
-        var cell = row.querySelector('td[data-itemid="' + gradeItemId + '"]');
-        if (!cell) {
-            return null;
-        }
-        var input = cell.querySelector('input');
-        if (input && typeof input.value === 'string') {
-            return parseGradeCellString(input.value);
-        }
-        return parseGradeCellString(cell.textContent || '');
-    }
-
-    /**
-     * Overall average: sum(non-placeholder values) / count, treating null as 0.
-     * @param {Array<{placeholder?: boolean, value: number|null}>} detail
-     * @returns {{percent: number|null, letter: string}}
-     */
-    function computeOverallFromDetail(detail) {
-        var rows = (detail || []).filter(function(r) {
-            return !r.placeholder;
-        });
-        if (!rows.length) {
-            return {percent: null, letter: ''};
-        }
-        var sum = 0;
-        var i;
-        for (i = 0; i < rows.length; i++) {
-            var v = rows[i].value;
-            sum += (v === null || typeof v === 'undefined' || isNaN(v)) ? 0 : Number(v);
-        }
-        var pct = Math.round((sum / rows.length) * 100) / 100;
-        return {
-            percent: pct,
-            letter: getRank(pct)
-        };
-    }
-
-    function buildPayloadFromGradeTable(basePayload, userId) {
-        var row = document.querySelector('tr.userrow[data-uid="' + userId + '"]');
-        if (!row || !basePayload.mapping_meta || !basePayload.mapping_meta.length) {
-            return basePayload;
-        }
-
-        var nextDetail = [];
-        basePayload.mapping_meta.forEach(function(skill) {
-            var weighted = 0;
-            var weightSum = 0;
-            (skill.items || []).forEach(function(mapping) {
-                var ball = getGradeCellRaw(row, mapping.gradeitemid);
-                if (ball === null) {
-                    return;
-                }
-                var percent = rawGradeToPercent(ball, mapping.grademin, mapping.grademax);
-                if (percent === null) {
-                    return;
-                }
-                var weight = mapping.weight > 0 ? mapping.weight : 1;
-                weighted += percent * weight;
-                weightSum += weight;
-            });
-            nextDetail.push({
-                key: skill.key,
-                label: skill.label,
-                color: skill.color,
-                value: weightSum > 0 ? Math.round((weighted / weightSum) * 100) / 100 : null,
-                items: (skill.items || []).length,
-                empty: weightSum <= 0,
-                placeholder: false
-            });
-        });
-
-        var nextValues = nextDetail.map(function(rowItem) {
-            return rowItem.value;
-        });
-        while (nextValues.length < 3) {
-            nextValues.push(null);
-        }
-
-        var nextOverall = computeOverallFromDetail(nextDetail);
-
-        return Object.assign({}, basePayload, {
-            skills: nextDetail.reduce(function(acc, rowItem) {
-                acc[rowItem.label] = rowItem.value === null ? 0 : rowItem.value;
-                return acc;
-            }, {}),
-            'skills_detail': nextDetail,
-            overall: {
-                percent: nextOverall.percent,
-                letter: nextOverall.letter
-            },
-            chart: Object.assign({}, basePayload.chart || {}, {
-                labels: nextDetail.map(function(rowItem) {
-                    return rowItem.label;
-                }),
-                values: nextValues
-            })
-        });
-    }
-
     function findFirstGraderUserId() {
         var row = document.querySelector('tr.userrow[data-uid]');
         return row ? parseInt(row.getAttribute('data-uid'), 10) : 0;
@@ -339,8 +202,8 @@
             pointBorderColor: '#fff',
             pointHoverBackgroundColor: '#fff',
             pointHoverBorderColor: hasUserValues ? solid : 'rgba(148, 163, 184, 0.95)',
-            pointRadius: hasUserValues ? 3 : 2,
-            pointHoverRadius: 4,
+            pointRadius: hasUserValues ? 6 : 4,
+            pointHoverRadius: 7,
             borderWidth: 0,
             fill: false,
             tension: 0,
@@ -366,8 +229,8 @@
                 borderColor: 'rgba(100, 116, 139, 0.9)',
                 pointBackgroundColor: 'rgba(100, 116, 139, 0.9)',
                 pointBorderColor: '#fff',
-                pointRadius: 2,
-                pointHoverRadius: 3,
+                pointRadius: 4,
+                pointHoverRadius: 5,
                 borderWidth: 0,
                 fill: false,
                 tension: 0
@@ -514,26 +377,21 @@
         var centerButton = document.getElementById('local-skillradar-center-score');
         var centerValue = document.getElementById('local-skillradar-score-value');
         var centerLabel = document.getElementById('local-skillradar-score-label');
+        var lastPayload = null;
 
         if (centerButton && !centerButton.getAttribute('data-bound')) {
             centerButton.setAttribute('data-bound', '1');
             centerButton.addEventListener('click', function() {
                 showPercentage = !showPercentage;
-                if (jsondebug && jsondebug.textContent) {
-                    try {
-                        var current = JSON.parse(jsondebug.textContent);
-                        if (current.payload) {
-                            updateCenterScore(current.payload, centerValue, centerLabel, centerButton);
-                        }
-                    } catch (e) {
-                        // Ignore JSON debug parsing issues for the toggle.
-                    }
+                if (lastPayload) {
+                    updateCenterScore(lastPayload, centerValue, centerLabel, centerButton);
                 }
             });
         }
 
         function load(userId) {
             if (!userId) {
+                lastPayload = null;
                 if (results) {
                     results.innerHTML = '<p class="local-skillradar-results-empty">' +
                         ((config.strings && config.strings.selectStudent) || 'Select student') + '</p>';
@@ -545,7 +403,7 @@
             }
             fetchPayload(config.apiUrl, config.courseId, userId, config.sesskey, true).then(function(payload) {
                 payload.strings = Object.assign({}, config.strings || {}, payload.strings || {});
-                payload = buildPayloadFromGradeTable(payload, userId);
+                lastPayload = payload;
                 applyPrimaryColor(panel, resolvePrimaryColor(payload, config.primaryColor));
                 renderChart(canvas, payload, {
                     button: centerButton,
@@ -553,19 +411,24 @@
                     label: centerLabel
                 });
                 renderResults(results, payload);
-                renderTextDebug(textdebug, payload);
-                renderJsonDebug(jsondebug, {
-                    userId: userId,
-                    payload: payload
-                });
+                if (config.debugSkillRadar) {
+                    renderTextDebug(textdebug, payload);
+                    renderJsonDebug(jsondebug, {
+                        userId: userId,
+                        payload: payload
+                    });
+                }
                 return payload;
             }).catch(function() {
+                lastPayload = null;
                 renderResults(results, {'skills_detail': [], strings: config.strings || {}});
-                renderTextDebug(textdebug, {'skills_detail': []});
-                renderJsonDebug(jsondebug, {
-                    userId: userId,
-                    error: 'fetch_failed'
-                });
+                if (config.debugSkillRadar) {
+                    renderTextDebug(textdebug, {'skills_detail': []});
+                    renderJsonDebug(jsondebug, {
+                        userId: userId,
+                        error: 'fetch_failed'
+                    });
+                }
             });
         }
 

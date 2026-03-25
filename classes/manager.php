@@ -112,4 +112,16 @@ class manager {
     public static function cache_key(int $courseid, int $userid): string {
         return 'c' . $courseid . '_u' . $userid;
     }
+
+    /**
+     * True when the course has at least one skill (axis) defined — then the block is shown to all viewers.
+     * With zero skills the course is treated as unset and only managers see the panel.
+     */
+    public static function is_course_skillradar_ready(int $courseid): bool {
+        global $DB;
+        if ($courseid < 1) {
+            return false;
+        }
+        return $DB->record_exists(self::TABLE_DEF, ['courseid' => $courseid]);
+    }
 }

@@ -285,8 +285,8 @@
             pointBorderColor: '#fff',
             pointHoverBackgroundColor: '#fff',
             pointHoverBorderColor: hasUserValues ? solid : 'rgba(148, 163, 184, 0.95)',
-            pointRadius: hasUserValues ? 3 : 2,
-            pointHoverRadius: 4,
+            pointRadius: hasUserValues ? 6 : 4,
+            pointHoverRadius: 7,
             borderWidth: 0,
             fill: false,
             tension: 0,
@@ -435,21 +435,14 @@
         var centerValue = document.getElementById('local-skillradar-manage-score-value');
         var centerLabel = document.getElementById('local-skillradar-manage-score-label');
         var strings = Object.assign({}, config.strings || {});
+        var lastPreviewOutput = null;
 
         if (centerButton && !centerButton.getAttribute('data-bound')) {
             centerButton.setAttribute('data-bound', '1');
             centerButton.addEventListener('click', function() {
                 showPercentage = !showPercentage;
-                if (jsondebug && jsondebug.textContent) {
-                    try {
-                        var current = JSON.parse(jsondebug.textContent);
-                        var nextPayload = current.payload || current.fallback;
-                        if (nextPayload) {
-                            updateCenterScore(nextPayload, centerValue, centerLabel, centerButton);
-                        }
-                    } catch (e) {
-                        // Ignore JSON parsing issues for the toggle.
-                    }
+                if (lastPreviewOutput) {
+                    updateCenterScore(lastPreviewOutput, centerValue, centerLabel, centerButton);
                 }
             });
         }
@@ -462,14 +455,17 @@
             }
             applyPrimaryColor(root, cfg.primaryColor || '#3B82F6');
             var fallback = buildFormPreviewPayload(strings, cfg.primaryColor);
-            renderJsonDebug(jsondebug, {
-                mode: 'form-preview',
-                config: cfg,
-                fallback: fallback
-            });
+            if (cfg.debugSkillRadar) {
+                renderJsonDebug(jsondebug, {
+                    mode: 'form-preview',
+                    config: cfg,
+                    fallback: fallback
+                });
+            }
             fetchPayload(cfg).then(function(payload) {
                 payload.strings = Object.assign({}, strings, payload.strings || {});
                 var output = hasRealGrades(payload) ? payload : fallback;
+                lastPreviewOutput = output;
                 applyPrimaryColor(root, resolvePrimaryColor(output, cfg.primaryColor));
                 renderChart(canvas, output, {
                     button: centerButton,
@@ -477,18 +473,21 @@
                     label: centerLabel
                 });
                 renderResults(results, output);
-                renderTextDebug(textdebug, output);
-                renderJsonDebug(jsondebug, {
-                    mode: hasRealGrades(payload) ? 'api-grades' : 'form-preview-fallback',
-                    config: cfg,
-                    payload: payload,
-                    fallback: fallback
-                });
+                if (cfg.debugSkillRadar) {
+                    renderTextDebug(textdebug, output);
+                    renderJsonDebug(jsondebug, {
+                        mode: hasRealGrades(payload) ? 'api-grades' : 'form-preview-fallback',
+                        config: cfg,
+                        payload: payload,
+                        fallback: fallback
+                    });
+                }
                 if (loading) {
                     loading.style.display = 'none';
                 }
                 return payload;
             }).catch(function() {
+                lastPreviewOutput = fallback;
                 applyPrimaryColor(root, resolvePrimaryColor(fallback, cfg.primaryColor));
                 renderChart(canvas, fallback, {
                     button: centerButton,
@@ -496,12 +495,14 @@
                     label: centerLabel
                 });
                 renderResults(results, fallback);
-                renderTextDebug(textdebug, fallback);
-                renderJsonDebug(jsondebug, {
-                    mode: 'fetch-fallback',
-                    config: cfg,
-                    fallback: fallback
-                });
+                if (cfg.debugSkillRadar) {
+                    renderTextDebug(textdebug, fallback);
+                    renderJsonDebug(jsondebug, {
+                        mode: 'fetch-fallback',
+                        config: cfg,
+                        fallback: fallback
+                    });
+                }
                 if (loading) {
                     loading.style.display = 'none';
                 }

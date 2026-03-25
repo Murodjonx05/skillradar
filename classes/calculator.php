@@ -313,16 +313,19 @@ class calculator {
                 }
             }
         } else {
-            // Average mode: sum(values) / count(skills), counting null as 0 (all defined skills participate).
-            $values = [];
+            // Average mode: mean of skills that have a grade (non-null); unmapped/ungraded skills are excluded.
+            $nonempty = [];
             foreach ($detail as $row) {
                 if (!empty($row['placeholder'])) {
                     continue;
                 }
-                $values[] = $row['value'] === null ? 0.0 : (float) $row['value'];
+                if ($row['value'] === null) {
+                    continue;
+                }
+                $nonempty[] = (float) $row['value'];
             }
-            if ($values !== []) {
-                $percent = round(array_sum($values) / count($values), 2);
+            if ($nonempty !== []) {
+                $percent = round(array_sum($nonempty) / count($nonempty), 2);
             }
         }
 

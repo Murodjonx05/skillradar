@@ -72,11 +72,29 @@ function local_skillradar_get_report_page_config(): array {
     return ['courseid' => 0, 'userid' => 0, 'type' => ''];
 }
 
+/**
+ * Whether to inject Skill Radar on grade report pages (assets + block).
+ * Non-managers only see it when the course has at least one skill (axis) defined.
+ */
+function local_skillradar_should_show_panel(int $courseid, \context_course $context): bool {
+    if ($courseid < 1) {
+        return false;
+    }
+    if (has_capability('local/skillradar:manage', $context)) {
+        return true;
+    }
+    return \local_skillradar\manager::is_course_skillradar_ready($courseid);
+}
+
 function local_skillradar_before_http_headers() {
     global $PAGE;
 
     $pageconfig = local_skillradar_get_report_page_config();
     if (empty($pageconfig['courseid'])) {
+        return;
+    }
+    $context = context_course::instance((int) $pageconfig['courseid']);
+    if (!local_skillradar_should_show_panel((int) $pageconfig['courseid'], $context)) {
         return;
     }
 
@@ -107,6 +125,8 @@ function local_skillradar_extend_navigation_course($navigation, $course, $contex
 }
 
 function local_skillradar_before_footer() {
+    global $CFG;
+
     $pageconfig = local_skillradar_get_report_page_config();
     $courseid = (int)$pageconfig['courseid'];
     if ($courseid < 1) {
@@ -114,6 +134,11 @@ function local_skillradar_before_footer() {
     }
 
     $context = context_course::instance($courseid);
+    if (!local_skillradar_should_show_panel($courseid, $context)) {
+        return '';
+    }
+
+    $debugskillradar = !empty($CFG->debugdeveloper) && has_capability('local/skillradar:manage', $context);
     $userid = (int)$pageconfig['userid'];
     $coursecfg = \local_skillradar\manager::get_course_config($courseid);
     $primary = $coursecfg->primarycolor ?? '#3B82F6';
@@ -132,6 +157,7 @@ function local_skillradar_before_footer() {
             'noResults' => get_string('noresults', 'local_skillradar'),
             'courseAverageLegend' => get_string('courseaveragelegend', 'local_skillradar'),
         ],
+        'debugSkillRadar' => $debugskillradar,
     ];
 
     $heading = html_writer::tag('h4', get_string('graderblocktitle', 'local_skillradar'));
@@ -162,10 +188,13 @@ function local_skillradar_before_footer() {
         'local-skillradar-chartwrap'
     );
     $results = html_writer::div('', 'local-skillradar-results', ['id' => 'local-skillradar-results']);
-    $textdebug = html_writer::div('', 'local-skillradar-textdebug', ['id' => 'local-skillradar-text']);
-    $jsondebug = html_writer::tag('pre', '', ['class' => 'local-skillradar-jsondebug', 'id' => 'local-skillradar-json']);
+    $debugblocks = '';
+    if ($debugskillradar) {
+        $debugblocks = html_writer::div('', 'local-skillradar-textdebug', ['id' => 'local-skillradar-text']) .
+            html_writer::tag('pre', '', ['class' => 'local-skillradar-jsondebug', 'id' => 'local-skillradar-json']);
+    }
     $body = html_writer::div(
-        $chart . $results . $textdebug . $jsondebug,
+        $chart . $results . $debugblocks,
         'local-skillradar-body'
     );
 

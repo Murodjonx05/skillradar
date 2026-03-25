@@ -6,6 +6,8 @@ require_once($CFG->libdir . '/gradelib.php');
 
 require_login();
 
+global $CFG, $DB, $OUTPUT;
+
 $courseid = required_param('courseid', PARAM_INT);
 $course = get_course($courseid);
 $context = context_course::instance($courseid);
@@ -27,8 +29,6 @@ $PAGE->requires->css(new moodle_url('/local/skillradar/styles/radar.css', ['v' =
 $PAGE->requires->js(new moodle_url('/local/skillradar/js/chart.umd.min.js', ['v' => $assetrev]), true);
 $PAGE->requires->js(new moodle_url('/local/skillradar/js/radar_arc_plugin.js', ['v' => $assetrev]), true);
 $PAGE->requires->js(new moodle_url('/local/skillradar/js/manage.js', ['v' => $assetrev]), true);
-
-global $DB, $OUTPUT;
 
 if (data_submitted() && confirm_sesskey()) {
     $action = optional_param('action', '', PARAM_ALPHA);
@@ -105,12 +105,15 @@ foreach ($mappings as $mapping) {
 
 $cfg = \local_skillradar\manager::get_course_config($courseid);
 
+$debugskillradar = !empty($CFG->debugdeveloper);
+
 $previewconfig = [
     'courseId' => $courseid,
     'userId' => \local_skillradar\manager::find_preview_userid($courseid),
     'primaryColor' => $cfg->primarycolor ?? '#3B82F6',
     'apiUrl' => (new moodle_url('/local/skillradar/api.php'))->out(false),
     'sesskey' => sesskey(),
+    'debugSkillRadar' => $debugskillradar,
     'strings' => [
         'loading' => get_string('loading', 'local_skillradar'),
         'notConfigured' => get_string('notconfigured', 'local_skillradar'),
@@ -228,6 +231,11 @@ if ($unmapped) {
 }
 
 echo html_writer::tag('h3', get_string('preview', 'local_skillradar'));
+$managedebugblocks = '';
+if ($debugskillradar) {
+    $managedebugblocks = html_writer::div('', 'local-skillradar-textdebug', ['id' => 'local-skillradar-manage-text']) .
+        html_writer::tag('pre', '', ['class' => 'local-skillradar-jsondebug', 'id' => 'local-skillradar-manage-json']);
+}
 echo html_writer::div(
     html_writer::div(
         html_writer::tag('canvas', '', ['id' => 'local-skillradar-manage-canvas']) .
@@ -244,8 +252,7 @@ echo html_writer::div(
     ) .
     html_writer::div(get_string('loading', 'local_skillradar'), 'local-skillradar-manage-loading', ['id' => 'local-skillradar-manage-loading']) .
     html_writer::div('', 'local-skillradar-results', ['id' => 'local-skillradar-manage-results']) .
-    html_writer::div('', 'local-skillradar-textdebug', ['id' => 'local-skillradar-manage-text']) .
-    html_writer::tag('pre', '', ['class' => 'local-skillradar-jsondebug', 'id' => 'local-skillradar-manage-json']),
+    $managedebugblocks,
     'local-skillradar-body',
     ['id' => 'local-skillradar-manage-preview', 'data-config' => json_encode($previewconfig)]
 );
