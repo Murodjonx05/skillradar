@@ -101,7 +101,7 @@
     function buildDatasets(payload, ctx) {
         var canvas = ctx.canvas;
         var primary = resolvePrimaryColor(payload, null);
-        var gradient = ctx.createLinearGradient(0, 0, canvas.width || 600, canvas.height || 600);
+        var gradient = ctx.createLinearGradient(0, 0, canvas.width || 720, canvas.height || 720);
         gradient.addColorStop(0, hexToRgba(primary, 0.24));
         gradient.addColorStop(1, hexToRgba(primary, 0.08));
 

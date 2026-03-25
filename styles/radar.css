@@ -15,9 +15,9 @@
 
 .local-skillradar-chartwrap {
     position: relative;
-    width: min(600px, 100%);
-    height: min(600px, 80vw);
-    min-height: 360px;
+    width: min(720px, 100%);
+    height: min(720px, 96vw);
+    min-height: 432px;
     margin: 0 auto;
 }
 
@@ -59,17 +59,17 @@
     margin: 0;
     padding: 0;
     color: var(--sr-primary, #3b82f6);
-    font-size: 34px;
+    font-size: 27px;
     font-weight: 800;
     line-height: 1;
     white-space: nowrap;
 }
 
 .local-skillradar-score-label {
-    margin-top: 6px;
+    margin-top: 5px;
     padding: 0;
     color: var(--sr-primary-muted, rgba(59, 130, 246, 0.72));
-    font-size: 11px;
+    font-size: 9px;
     font-weight: 700;
     line-height: 1;
     letter-spacing: 0.08em;
@@ -78,13 +78,13 @@
 }
 
 .local-skillradar-center-score.rank-mode .local-skillradar-score-value {
-    font-size: 42px;
+    font-size: 34px;
     letter-spacing: 0.02em;
 }
 
 .local-skillradar-center-score.rank-mode .local-skillradar-score-label {
-    margin-top: 5px;
-    font-size: 10px;
+    margin-top: 4px;
+    font-size: 8px;
 }
 
 .local-skillradar-results {
@@ -185,11 +185,11 @@
 @media (max-width: 767px) {
     .local-skillradar-chartwrap {
         width: 100%;
-        height: 88vw;
-        min-height: 320px;
+        height: 106vw;
+        min-height: 384px;
     }
 
     .local-skillradar-score-value {
-        font-size: 28px;
+        font-size: 22px;
     }
 }
