@@ -101,12 +101,14 @@ function local_skillradar_before_http_headers() {
     $assetrev = (string)max(
         @filemtime(__DIR__ . '/js/chart.umd.min.js') ?: 0,
         @filemtime(__DIR__ . '/js/radar_arc_plugin.js') ?: 0,
+        @filemtime(__DIR__ . '/js/common.js') ?: 0,
         @filemtime(__DIR__ . '/js/script.js') ?: 0,
         @filemtime(__DIR__ . '/styles/radar.css') ?: 0
     );
     $PAGE->requires->css(new moodle_url('/local/skillradar/styles/radar.css', ['v' => $assetrev]));
     $PAGE->requires->js(new moodle_url('/local/skillradar/js/chart.umd.min.js', ['v' => $assetrev]), true);
     $PAGE->requires->js(new moodle_url('/local/skillradar/js/radar_arc_plugin.js', ['v' => $assetrev]), true);
+    $PAGE->requires->js(new moodle_url('/local/skillradar/js/common.js', ['v' => $assetrev]), true);
     $PAGE->requires->js(new moodle_url('/local/skillradar/js/script.js', ['v' => $assetrev]), true);
 }
 

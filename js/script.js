@@ -7,69 +7,19 @@
     var chartInstance = null;
     var showPercentage = true;
 
-    /**
-     * Radial axis: min < 0 so 0% maps to an inner ring, not the geometric center.
-     * Lines for low scores stay outside the center score label; zeros remain visible as points on that ring.
-     */
-    var RADAR_R_MIN = -20;
-    var RADAR_R_MAX = 100;
-
-    function readConfig(root) {
-        try {
-            return JSON.parse(root.getAttribute('data-config') || '{}');
-        } catch (e) {
-            return null;
-        }
+    var C = window.localSkillRadarCommon;
+    if (!C) {
+        return;
     }
-
-    function getRank(percent) {
-        if (percent === null || typeof percent === 'undefined' || isNaN(percent)) {
-            return '—';
-        }
-        if (percent >= 95) {
-            return 'S+';
-        }
-        if (percent >= 90) {
-            return 'S';
-        }
-        if (percent >= 85) {
-            return 'S-';
-        }
-        if (percent >= 80) {
-            return 'A+';
-        }
-        if (percent >= 75) {
-            return 'A';
-        }
-        if (percent >= 70) {
-            return 'A-';
-        }
-        if (percent >= 65) {
-            return 'B+';
-        }
-        if (percent >= 60) {
-            return 'B';
-        }
-        if (percent >= 55) {
-            return 'B-';
-        }
-        if (percent >= 50) {
-            return 'C+';
-        }
-        if (percent >= 40) {
-            return 'C';
-        }
-        if (percent >= 30) {
-            return 'D';
-        }
-        if (percent >= 15) {
-            return 'E+';
-        }
-        if (percent >= 5) {
-            return 'E';
-        }
-        return 'E-';
-    }
+    var RADAR_R_MIN = C.RADAR_R_MIN;
+    var RADAR_R_MAX = C.RADAR_R_MAX;
+    var escapeHtml = C.escapeHtml;
+    var safeHexColor = C.safeHexColor;
+    var getRank = C.getRank;
+    var readConfig = C.readConfig;
+    var hexToRgba = C.hexToRgba;
+    var applyPrimaryColor = C.applyPrimaryColor;
+    var resolvePrimaryColor = C.resolvePrimaryColor;
 
     function renderResults(container, payload) {
         if (!container) {
@@ -91,8 +41,8 @@
             '</h5><div class="local-skillradar-results-list">';
         rows.forEach(function(row) {
             html += '<div class="local-skillradar-result-item">' +
-                '<span class="local-skillradar-result-dot" style="background:' + row.color + ';"></span>' +
-                '<span class="local-skillradar-result-label">' + row.label + '</span>' +
+                '<span class="local-skillradar-result-dot" style="background:' + safeHexColor(row.color) + ';"></span>' +
+                '<span class="local-skillradar-result-label">' + escapeHtml(row.label) + '</span>' +
                 '<span class="local-skillradar-result-value">' +
                 (row.value === null ? '—' : row.value.toFixed(2) + '%') +
                 '</span>' +
@@ -112,7 +62,7 @@
             return;
         }
         container.innerHTML = rows.map(function(row) {
-            return '<p><strong>' + row.label + '</strong>: ' +
+            return '<p><strong>' + escapeHtml(row.label) + '</strong>: ' +
                 (row.value === null ? '—' : row.value.toFixed(2) + '%') +
                 ' | items=' + row.items +
                 ' | empty=' + (row.empty ? 'true' : 'false') +
@@ -148,39 +98,6 @@
         return row ? parseInt(row.getAttribute('data-uid'), 10) : 0;
     }
 
-    function hexToRgb(hex) {
-        var m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex || '');
-        return m ? {
-            r: parseInt(m[1], 16),
-            g: parseInt(m[2], 16),
-            b: parseInt(m[3], 16)
-        } : {r: 59, g: 130, b: 246};
-    }
-
-    function hexToRgba(hex, a) {
-        var o = hexToRgb(hex);
-        return 'rgba(' + o.r + ',' + o.g + ',' + o.b + ',' + a + ')';
-    }
-
-    function applyPrimaryColor(root, hex) {
-        if (!root || !hex) {
-            return;
-        }
-        var rgb = hexToRgb(hex);
-        root.style.setProperty('--sr-primary', hex);
-        root.style.setProperty('--sr-primary-muted', 'rgba(' + rgb.r + ',' + rgb.g + ',' + rgb.b + ',0.72)');
-    }
-
-    function resolvePrimaryColor(payload, fallback) {
-        if (payload && payload.primaryColor) {
-            return payload.primaryColor;
-        }
-        if (payload && payload.config && payload.config.primaryColor) {
-            return payload.config.primaryColor;
-        }
-        return fallback || '#3B82F6';
-    }
-
     function buildDatasets(payload, ctx) {
         var canvas = ctx.canvas;
         var primary = resolvePrimaryColor(payload, null);
@@ -188,13 +105,16 @@
         gradient.addColorStop(0, hexToRgba(primary, 0.24));
         gradient.addColorStop(1, hexToRgba(primary, 0.08));
 
-        var hasUserValues = (payload.chart && payload.chart.values ? payload.chart.values : []).some(function(value) {
-            return value !== null;
-        });
         var chartVals = payload.chart && payload.chart.values ? payload.chart.values : [];
-        var userValues = chartVals.map(function(value) {
-            return value === null ? 0 : value;
-        });
+        var hasUserValues = false;
+        var userValues = new Array(chartVals.length);
+        for (var vi = 0; vi < chartVals.length; vi++) {
+            var v = chartVals[vi];
+            if (v !== null) {
+                hasUserValues = true;
+            }
+            userValues[vi] = v === null ? 0 : v;
+        }
         var solid = hexToRgba(primary, 1);
 
         var datasets = [{
@@ -266,7 +186,14 @@
     }
 
     function renderChart(canvas, payload, centerElements) {
-        if (!canvas || typeof Chart === 'undefined' || !payload.chart) {
+        if (!canvas || typeof Chart === 'undefined') {
+            return;
+        }
+        if (!payload || !payload.chart) {
+            if (chartInstance) {
+                chartInstance.destroy();
+                chartInstance = null;
+            }
             return;
         }
         var labels = payload.chart.labels || [];
@@ -326,6 +253,9 @@
                                 if (datasetLabel) {
                                     datasetLabel += ': ';
                                 }
+                                if (value === null || typeof value === 'undefined' || isNaN(value)) {
+                                    return datasetLabel + '—';
+                                }
                                 return datasetLabel + value + '% (' + getRank(value) + ')';
                             }
                         }
@@ -376,11 +306,11 @@
         if (panel.getAttribute('data-sr-booted') === '1') {
             return;
         }
-        panel.setAttribute('data-sr-booted', '1');
         var config = readConfig(panel);
         if (!config) {
             return;
         }
+        panel.setAttribute('data-sr-booted', '1');
         applyPrimaryColor(panel, config.primaryColor || '#3B82F6');
         var results = document.getElementById('local-skillradar-results');
         var textdebug = document.getElementById('local-skillradar-text');

@@ -7,66 +7,19 @@
     var chartInstance = null;
     var showPercentage = true;
 
-    /** Match script.js: 0% on inner ring, not at center (room for center score label). */
-    var RADAR_R_MIN = -20;
-    var RADAR_R_MAX = 100;
-
-    function readConfig(root) {
-        try {
-            return JSON.parse(root.getAttribute('data-config') || '{}');
-        } catch (e) {
-            return null;
-        }
+    var C = window.localSkillRadarCommon;
+    if (!C) {
+        return;
     }
-
-    function getRank(percent) {
-        if (percent === null || typeof percent === 'undefined' || isNaN(percent)) {
-            return '—';
-        }
-        if (percent >= 95) {
-            return 'S+';
-        }
-        if (percent >= 90) {
-            return 'S';
-        }
-        if (percent >= 85) {
-            return 'S-';
-        }
-        if (percent >= 80) {
-            return 'A+';
-        }
-        if (percent >= 75) {
-            return 'A';
-        }
-        if (percent >= 70) {
-            return 'A-';
-        }
-        if (percent >= 65) {
-            return 'B+';
-        }
-        if (percent >= 60) {
-            return 'B';
-        }
-        if (percent >= 55) {
-            return 'B-';
-        }
-        if (percent >= 50) {
-            return 'C+';
-        }
-        if (percent >= 40) {
-            return 'C';
-        }
-        if (percent >= 30) {
-            return 'D';
-        }
-        if (percent >= 15) {
-            return 'E+';
-        }
-        if (percent >= 5) {
-            return 'E';
-        }
-        return 'E-';
-    }
+    var RADAR_R_MIN = C.RADAR_R_MIN;
+    var RADAR_R_MAX = C.RADAR_R_MAX;
+    var escapeHtml = C.escapeHtml;
+    var safeHexColor = C.safeHexColor;
+    var getRank = C.getRank;
+    var readConfig = C.readConfig;
+    var hexToRgba = C.hexToRgba;
+    var applyPrimaryColor = C.applyPrimaryColor;
+    var resolvePrimaryColor = C.resolvePrimaryColor;
 
     function ensureMinSkills(detail, strings) {
         var label = (strings && strings.notConfigured) || 'Not configured';
@@ -98,39 +51,6 @@
         });
     }
 
-    function hexToRgb(hex) {
-        var m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex || '');
-        return m ? {
-            r: parseInt(m[1], 16),
-            g: parseInt(m[2], 16),
-            b: parseInt(m[3], 16)
-        } : {r: 59, g: 130, b: 246};
-    }
-
-    function hexToRgba(hex, a) {
-        var o = hexToRgb(hex);
-        return 'rgba(' + o.r + ',' + o.g + ',' + o.b + ',' + a + ')';
-    }
-
-    function applyPrimaryColor(root, hex) {
-        if (!root || !hex) {
-            return;
-        }
-        var rgb = hexToRgb(hex);
-        root.style.setProperty('--sr-primary', hex);
-        root.style.setProperty('--sr-primary-muted', 'rgba(' + rgb.r + ',' + rgb.g + ',' + rgb.b + ',0.72)');
-    }
-
-    function resolvePrimaryColor(payload, fallback) {
-        if (payload && payload.primaryColor) {
-            return payload.primaryColor;
-        }
-        if (payload && payload.config && payload.config.primaryColor) {
-            return payload.config.primaryColor;
-        }
-        return fallback || '#3B82F6';
-    }
-
     function buildFormPreviewPayload(strings, primaryHex) {
         var defs = collectSkillDefinitions();
         var counts = {};
@@ -157,25 +77,29 @@
             };
         }), strings);
 
+        var labels = [];
+        var chartValues = [];
+        var colors = [];
+        var placeholderArr = [];
+        var keys = [];
+        for (var di = 0; di < detail.length; di++) {
+            var row = detail[di];
+            labels.push(row.label);
+            chartValues.push(row.value);
+            colors.push(row.empty ? '#94A3B8' : row.color);
+            placeholderArr.push(row.placeholder);
+            keys.push(row.key);
+        }
+
         return {
             primaryColor: primaryHex || '#3B82F6',
             'skills_detail': detail,
             chart: {
-                labels: detail.map(function(row) {
-                    return row.label;
-                }),
-                values: detail.map(function(row) {
-                    return row.value;
-                }),
-                colors: detail.map(function(row) {
-                    return row.empty ? '#94A3B8' : row.color;
-                }),
-                placeholder: detail.map(function(row) {
-                    return row.placeholder;
-                }),
-                keys: detail.map(function(row) {
-                    return row.key;
-                })
+                labels: labels,
+                values: chartValues,
+                colors: colors,
+                placeholder: placeholderArr,
+                keys: keys
             },
             overall: {
                 percent: null,
@@ -205,8 +129,8 @@
             '</h5><div class="local-skillradar-results-list">';
         rows.forEach(function(row) {
             html += '<div class="local-skillradar-result-item">' +
-                '<span class="local-skillradar-result-dot" style="background:' + row.color + ';"></span>' +
-                '<span class="local-skillradar-result-label">' + row.label + '</span>' +
+                '<span class="local-skillradar-result-dot" style="background:' + safeHexColor(row.color) + ';"></span>' +
+                '<span class="local-skillradar-result-label">' + escapeHtml(row.label) + '</span>' +
                 '<span class="local-skillradar-result-value">' +
                 (row.value === null ? '—' : row.value.toFixed(2) + '%') +
                 '<span class="local-skillradar-result-meta">' + row.items + ' ' +
@@ -228,7 +152,7 @@
             return;
         }
         container.innerHTML = rows.map(function(row) {
-            return '<p><strong>' + row.label + '</strong>: ' +
+            return '<p><strong>' + escapeHtml(row.label) + '</strong>: ' +
                 (row.value === null ? '—' : row.value.toFixed(2) + '%') +
                 ' | items=' + row.items +
                 ' | empty=' + (row.empty ? 'true' : 'false') +
@@ -251,7 +175,11 @@
         if (config.includeCourseAverage) {
             params.set('courseavg', '1');
         }
-        return fetch(config.apiUrl + '?' + params.toString(), {credentials: 'same-origin'}).then(function(response) {
+        var fetchOpts = {credentials: 'same-origin'};
+        if (config.signal) {
+            fetchOpts.signal = config.signal;
+        }
+        return fetch(config.apiUrl + '?' + params.toString(), fetchOpts).then(function(response) {
             if (!response.ok) {
                 throw new Error('skillradar_http_' + response.status);
             }
@@ -272,17 +200,20 @@
         gradient.addColorStop(0, hexToRgba(primary, 0.24));
         gradient.addColorStop(1, hexToRgba(primary, 0.08));
 
-        var hasUserValues = (payload.chart && payload.chart.values ? payload.chart.values : []).some(function(value) {
-            return value !== null;
-        });
-
         var chartVals = payload.chart && payload.chart.values ? payload.chart.values : [];
+        var hasUserValues = false;
+        var mappedVals = new Array(chartVals.length);
+        for (var vi = 0; vi < chartVals.length; vi++) {
+            var val = chartVals[vi];
+            if (val !== null) {
+                hasUserValues = true;
+            }
+            mappedVals[vi] = val === null ? 0 : val;
+        }
         var solid = hexToRgba(primary, 1);
         var datasets = [{
             label: 'Skill level (%)',
-            data: chartVals.map(function(value) {
-                return value === null ? 0 : value;
-            }),
+            data: mappedVals,
             radarArcSegments: true,
             radarArcStrokeWidth: 2.4,
             backgroundColor: hasUserValues ? gradient : 'rgba(148, 163, 184, 0.08)',
@@ -349,7 +280,14 @@
     }
 
     function renderChart(canvas, payload, centerElements) {
-        if (!canvas || typeof Chart === 'undefined' || !payload.chart) {
+        if (!canvas || typeof Chart === 'undefined') {
+            return;
+        }
+        if (!payload || !payload.chart) {
+            if (chartInstance) {
+                chartInstance.destroy();
+                chartInstance = null;
+            }
             return;
         }
         var context = canvas.getContext('2d');
@@ -408,6 +346,9 @@
                                 if (datasetLabel) {
                                     datasetLabel += ': ';
                                 }
+                                if (value === null || typeof value === 'undefined' || isNaN(value)) {
+                                    return datasetLabel + '—';
+                                }
                                 return datasetLabel + value + '% (' + getRank(value) + ')';
                             }
                         }
@@ -439,7 +380,7 @@
                     }
                 },
                 animation: {
-                    duration: 700
+                    duration: 0
                 }
             },
             plugins: typeof localSkillRadarCreateArcPlugin === 'function' ?
@@ -471,6 +412,19 @@
         var centerLabel = document.getElementById('local-skillradar-manage-score-label');
         var strings = Object.assign({}, config.strings || {});
         var lastPreviewOutput = null;
+        var previewAbort = null;
+        var previewSeq = 0;
+        var previewDebounceTimer = null;
+
+        function debouncedUpdatePreview() {
+            if (previewDebounceTimer !== null) {
+                clearTimeout(previewDebounceTimer);
+            }
+            previewDebounceTimer = setTimeout(function() {
+                previewDebounceTimer = null;
+                updatePreview();
+            }, 200);
+        }
 
         if (centerButton && !centerButton.getAttribute('data-bound')) {
             centerButton.setAttribute('data-bound', '1');
@@ -483,7 +437,14 @@
         }
 
         function updatePreview() {
+            var seq = ++previewSeq;
+            if (previewAbort) {
+                previewAbort.abort();
+            }
+            previewAbort = new AbortController();
+
             var cfg = readConfig(root);
+            cfg.signal = previewAbort.signal;
             var picker = document.getElementById('id_primarycolor');
             if (picker && picker.value) {
                 cfg.primaryColor = picker.value;
@@ -498,6 +459,9 @@
                 });
             }
             fetchPayload(cfg).then(function(payload) {
+                if (seq !== previewSeq) {
+                    return undefined;
+                }
                 payload.strings = Object.assign({}, strings, payload.strings || {});
                 var output = hasRealGrades(payload) ? payload : fallback;
                 lastPreviewOutput = output;
@@ -521,7 +485,13 @@
                     loading.style.display = 'none';
                 }
                 return payload;
-            }).catch(function() {
+            }).catch(function(err) {
+                if (err && err.name === 'AbortError') {
+                    return undefined;
+                }
+                if (seq !== previewSeq) {
+                    return undefined;
+                }
                 lastPreviewOutput = fallback;
                 applyPrimaryColor(root, resolvePrimaryColor(fallback, cfg.primaryColor));
                 renderChart(canvas, fallback, {
@@ -550,7 +520,7 @@
                 if (loading) {
                     loading.style.display = 'block';
                 }
-                updatePreview();
+                debouncedUpdatePreview();
             }
         });
 
