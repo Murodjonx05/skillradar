@@ -49,6 +49,7 @@
         <FIELD NAME="courseid" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false"/>
         <FIELD NAME="overallmode" TYPE="char" LENGTH="20" NOTNULL="true" DEFAULT="average" SEQUENCE="false"/>
         <FIELD NAME="courseavg" TYPE="int" LENGTH="1" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
+        <FIELD NAME="primarycolor" TYPE="char" LENGTH="7" NOTNULL="true" DEFAULT="#3B82F6" SEQUENCE="false"/>
         <FIELD NAME="timecreated" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
         <FIELD NAME="timemodified" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
       </FIELDS>

@@ -1,5 +1,5 @@
 // This file is part of Moodle - http://moodle.org/
-/* global Chart */
+/* global Chart, localSkillRadarCreateArcPlugin */
 
 (function() {
     'use strict';
@@ -278,52 +278,99 @@
         return row ? parseInt(row.getAttribute('data-uid'), 10) : 0;
     }
 
+    function hexToRgb(hex) {
+        var m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex || '');
+        return m ? {
+            r: parseInt(m[1], 16),
+            g: parseInt(m[2], 16),
+            b: parseInt(m[3], 16)
+        } : {r: 59, g: 130, b: 246};
+    }
+
+    function hexToRgba(hex, a) {
+        var o = hexToRgb(hex);
+        return 'rgba(' + o.r + ',' + o.g + ',' + o.b + ',' + a + ')';
+    }
+
+    function applyPrimaryColor(root, hex) {
+        if (!root || !hex) {
+            return;
+        }
+        var rgb = hexToRgb(hex);
+        root.style.setProperty('--sr-primary', hex);
+        root.style.setProperty('--sr-primary-muted', 'rgba(' + rgb.r + ',' + rgb.g + ',' + rgb.b + ',0.72)');
+    }
+
+    function resolvePrimaryColor(payload, fallback) {
+        if (payload && payload.primaryColor) {
+            return payload.primaryColor;
+        }
+        if (payload && payload.config && payload.config.primaryColor) {
+            return payload.config.primaryColor;
+        }
+        return fallback || '#3B82F6';
+    }
+
     function buildDatasets(payload, ctx) {
         var canvas = ctx.canvas;
+        var primary = resolvePrimaryColor(payload, null);
         var gradient = ctx.createLinearGradient(0, 0, canvas.width || 600, canvas.height || 600);
-        gradient.addColorStop(0, 'rgba(54, 162, 235, 0.24)');
-        gradient.addColorStop(1, 'rgba(54, 162, 235, 0.08)');
+        gradient.addColorStop(0, hexToRgba(primary, 0.24));
+        gradient.addColorStop(1, hexToRgba(primary, 0.08));
 
         var hasUserValues = (payload.chart && payload.chart.values ? payload.chart.values : []).some(function(value) {
             return value !== null;
         });
-        var userValues = (payload.chart && payload.chart.values ? payload.chart.values : []).map(function(value) {
+        var chartVals = payload.chart && payload.chart.values ? payload.chart.values : [];
+        var userValues = chartVals.map(function(value) {
             return value === null ? 0 : value;
         });
+        var solid = hexToRgba(primary, 1);
 
         var datasets = [{
             label: 'Skill level (%)',
             data: userValues,
+            radarArcSegments: true,
+            radarArcStrokeWidth: 2.4,
             backgroundColor: hasUserValues ? gradient : 'rgba(148, 163, 184, 0.08)',
-            borderColor: hasUserValues ? 'rgba(54, 162, 235, 1)' : 'rgba(148, 163, 184, 0.95)',
+            borderColor: hasUserValues ? solid : 'rgba(148, 163, 184, 0.95)',
             borderDash: hasUserValues ? [] : [6, 6],
-            pointBackgroundColor: hasUserValues ? 'rgba(54, 162, 235, 1)' : 'rgba(148, 163, 184, 0.95)',
+            pointBackgroundColor: hasUserValues ? solid : 'rgba(148, 163, 184, 0.95)',
             pointBorderColor: '#fff',
             pointHoverBackgroundColor: '#fff',
-            pointHoverBorderColor: hasUserValues ? 'rgba(54, 162, 235, 1)' : 'rgba(148, 163, 184, 0.95)',
+            pointHoverBorderColor: hasUserValues ? solid : 'rgba(148, 163, 184, 0.95)',
             pointRadius: hasUserValues ? 3 : 2,
             pointHoverRadius: 4,
-            borderWidth: 2.4,
-            tension: 0.32,
-            fill: true
+            borderWidth: 0,
+            fill: false,
+            tension: 0,
+            radarWaveNoise: hasUserValues,
+            radarWaveAmp: 0.034,
+            radarWaveShadowColor: hasUserValues ? solid : undefined
         }];
 
         if (payload.course_average && payload.course_average.values) {
+            var avgVals = payload.course_average.values;
             datasets.push({
                 label: payload.course_average.label ||
                     ((payload.strings && payload.strings.courseAverageLegend) || 'Course average'),
-                data: payload.course_average.values.map(function(value) {
+                data: avgVals.map(function(value) {
                     return value === null ? 0 : value;
                 }),
+                radarArcSegments: true,
+                radarArcStrokeWidth: 1.8,
+                radarWaveAmp: 0.022,
+                radarWaveGlowAlpha: 0.55,
+                radarWaveShadowBlur: 8,
                 backgroundColor: 'rgba(100, 116, 139, 0.08)',
                 borderColor: 'rgba(100, 116, 139, 0.9)',
                 pointBackgroundColor: 'rgba(100, 116, 139, 0.9)',
                 pointBorderColor: '#fff',
                 pointRadius: 2,
                 pointHoverRadius: 3,
-                borderWidth: 1.8,
-                tension: 0.28,
-                fill: true
+                borderWidth: 0,
+                fill: false,
+                tension: 0
             });
         }
 
@@ -335,7 +382,7 @@
             return;
         }
         var percent = payload.overall && payload.overall.percent !== null ? payload.overall.percent : null;
-        var letter = payload.overall && payload.overall.letter ? payload.overall.letter : getRank(percent);
+        var letter = getRank(percent);
         if (showPercentage) {
             buttonNode.classList.remove('rank-mode');
             valueNode.textContent = percent === null ? '—' : Math.round(percent) + '%';
@@ -442,7 +489,9 @@
                     duration: 700
                 }
             },
-            plugins: [centerHtmlPlugin]
+            plugins: typeof localSkillRadarCreateArcPlugin === 'function' ?
+                [centerHtmlPlugin, localSkillRadarCreateArcPlugin()] :
+                [centerHtmlPlugin]
         });
 
         updateCenterScore(payload, centerElements.value, centerElements.label, centerElements.button);
@@ -457,6 +506,7 @@
         if (!config) {
             return;
         }
+        applyPrimaryColor(panel, config.primaryColor || '#3B82F6');
         var results = document.getElementById('local-skillradar-results');
         var textdebug = document.getElementById('local-skillradar-text');
         var jsondebug = document.getElementById('local-skillradar-json');
@@ -496,6 +546,7 @@
             fetchPayload(config.apiUrl, config.courseId, userId, config.sesskey, true).then(function(payload) {
                 payload.strings = Object.assign({}, config.strings || {}, payload.strings || {});
                 payload = buildPayloadFromGradeTable(payload, userId);
+                applyPrimaryColor(panel, resolvePrimaryColor(payload, config.primaryColor));
                 renderChart(canvas, payload, {
                     button: centerButton,
                     value: centerValue,

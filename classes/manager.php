@@ -23,6 +23,7 @@ class manager {
             'courseid' => $courseid,
             'overallmode' => 'average',
             'courseavg' => 0,
+            'primarycolor' => '#3B82F6',
         ];
     }
 

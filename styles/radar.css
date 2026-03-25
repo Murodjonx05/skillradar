@@ -58,7 +58,7 @@
 .local-skillradar-score-value {
     margin: 0;
     padding: 0;
-    color: rgba(54, 162, 235, 1);
+    color: var(--sr-primary, #3b82f6);
     font-size: 34px;
     font-weight: 800;
     line-height: 1;
@@ -68,7 +68,7 @@
 .local-skillradar-score-label {
     margin-top: 6px;
     padding: 0;
-    color: rgba(54, 162, 235, 0.72);
+    color: var(--sr-primary-muted, rgba(59, 130, 246, 0.72));
     font-size: 11px;
     font-weight: 700;
     line-height: 1;

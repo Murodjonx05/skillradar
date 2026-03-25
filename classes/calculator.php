@@ -97,15 +97,18 @@ class calculator {
         $chart = self::build_chart_meta($detail);
         $overall = self::compute_overall($courseid, $userid, $config, $detail);
 
+        $primary = $config->primarycolor ?? '#3B82F6';
         $payload = [
             'skills' => self::build_skills_map($detail),
             'skills_detail' => $detail,
             'mapping_meta' => self::build_mapping_meta($courseid, $definitions, $mappings),
             'chart' => $chart,
             'overall' => $overall,
+            'primaryColor' => $primary,
             'config' => [
                 'overallmode' => $config->overallmode ?? 'average',
                 'minaxes' => count($chart['labels']),
+                'primaryColor' => $primary,
             ],
         ];
 
@@ -329,26 +332,56 @@ class calculator {
         ];
     }
 
+    /**
+     * Letter grade from percent — same bands as getRank() in js/script.js (grader page).
+     */
     protected static function percent_to_letter(?float $percent): string {
         if ($percent === null) {
             return '';
         }
-        if ($percent >= 97) {
-            return 'S-';
+        if ($percent >= 95) {
+            return 'S+';
         }
         if ($percent >= 90) {
-            return 'A';
+            return 'S';
+        }
+        if ($percent >= 85) {
+            return 'S-';
         }
         if ($percent >= 80) {
-            return 'B';
+            return 'A+';
+        }
+        if ($percent >= 75) {
+            return 'A';
         }
         if ($percent >= 70) {
-            return 'C';
+            return 'A-';
+        }
+        if ($percent >= 65) {
+            return 'B+';
         }
         if ($percent >= 60) {
+            return 'B';
+        }
+        if ($percent >= 55) {
+            return 'B-';
+        }
+        if ($percent >= 50) {
+            return 'C+';
+        }
+        if ($percent >= 40) {
+            return 'C';
+        }
+        if ($percent >= 30) {
             return 'D';
         }
-        return 'F';
+        if ($percent >= 15) {
+            return 'E+';
+        }
+        if ($percent >= 5) {
+            return 'E';
+        }
+        return 'E-';
     }
 
     protected static function build_course_average(int $courseid, array $detail): array {

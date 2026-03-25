@@ -19,11 +19,13 @@ $PAGE->set_title(get_string('manageheading', 'local_skillradar'));
 
 $assetrev = (string)max(
     @filemtime(__DIR__ . '/js/chart.umd.min.js') ?: 0,
+    @filemtime(__DIR__ . '/js/radar_arc_plugin.js') ?: 0,
     @filemtime(__DIR__ . '/js/manage.js') ?: 0,
     @filemtime(__DIR__ . '/styles/radar.css') ?: 0
 );
 $PAGE->requires->css(new moodle_url('/local/skillradar/styles/radar.css', ['v' => $assetrev]));
 $PAGE->requires->js(new moodle_url('/local/skillradar/js/chart.umd.min.js', ['v' => $assetrev]), true);
+$PAGE->requires->js(new moodle_url('/local/skillradar/js/radar_arc_plugin.js', ['v' => $assetrev]), true);
 $PAGE->requires->js(new moodle_url('/local/skillradar/js/manage.js', ['v' => $assetrev]), true);
 
 global $DB, $OUTPUT;
@@ -33,7 +35,8 @@ if (data_submitted() && confirm_sesskey()) {
     if ($action === 'addskill') {
         $skillkey = clean_param(optional_param('skill_key', '', PARAM_ALPHANUMEXT), PARAM_ALPHANUMEXT);
         $displayname = optional_param('displayname', '', PARAM_TEXT);
-        $color = clean_param(optional_param('color', '#3B82F6', PARAM_TEXT), PARAM_TEXT);
+        $cfgadd = \local_skillradar\manager::get_course_config($courseid);
+        $color = $cfgadd->primarycolor ?? '#3B82F6';
         if ($skillkey !== '' && $displayname !== '' &&
                 !$DB->record_exists(\local_skillradar\manager::TABLE_DEF, ['courseid' => $courseid, 'skill_key' => $skillkey])) {
             $sortorder = (int)$DB->get_field_sql(
@@ -66,6 +69,8 @@ if (data_submitted() && confirm_sesskey()) {
             $config->overallmode = 'average';
         }
         $config->courseavg = optional_param('courseavg', 0, PARAM_BOOL);
+        $pc = clean_param(optional_param('primarycolor', '#3B82F6', PARAM_TEXT), PARAM_TEXT);
+        $config->primarycolor = preg_match('/^#[0-9A-Fa-f]{6}$/', $pc) ? $pc : '#3B82F6';
         \local_skillradar\manager::save_course_config($config);
         \local_skillradar\manager::invalidate_course_cache($courseid);
     } else if ($action === 'savemaps') {
@@ -98,9 +103,12 @@ foreach ($mappings as $mapping) {
     $mapbyitem[$mapping->gradeitemid] = $mapping;
 }
 
+$cfg = \local_skillradar\manager::get_course_config($courseid);
+
 $previewconfig = [
     'courseId' => $courseid,
     'userId' => \local_skillradar\manager::find_preview_userid($courseid),
+    'primaryColor' => $cfg->primarycolor ?? '#3B82F6',
     'apiUrl' => (new moodle_url('/local/skillradar/api.php'))->out(false),
     'sesskey' => sesskey(),
     'strings' => [
@@ -122,9 +130,8 @@ echo '<form method="post" action="' . s($PAGE->url->out(false)) . '" class="mb-3
 echo '<input type="hidden" name="sesskey" value="' . sesskey() . '" />';
 echo '<input type="hidden" name="action" value="addskill" />';
 echo '<div class="row align-items-end g-3">';
-echo '<div class="col-md-4"><label class="form-label">' . get_string('skillkey', 'local_skillradar') . '</label><input class="form-control" name="skill_key" required maxlength="100" /></div>';
-echo '<div class="col-md-4"><label class="form-label">' . get_string('displayname', 'local_skillradar') . '</label><input class="form-control" name="displayname" required maxlength="255" /></div>';
-echo '<div class="col-md-2"><label class="form-label">' . get_string('color', 'local_skillradar') . '</label><input class="form-control form-control-color" type="color" name="color" value="#3B82F6" /></div>';
+echo '<div class="col-md-5"><label class="form-label">' . get_string('skillkey', 'local_skillradar') . '</label><input class="form-control" name="skill_key" required maxlength="100" /></div>';
+echo '<div class="col-md-5"><label class="form-label">' . get_string('displayname', 'local_skillradar') . '</label><input class="form-control" name="displayname" required maxlength="255" /></div>';
 echo '<div class="col-md-2"><button class="btn btn-primary" type="submit">' . get_string('addskill', 'local_skillradar') . '</button></div>';
 echo '</div></form>';
 
@@ -133,7 +140,6 @@ if ($definitions) {
     $table->head = [
         get_string('skillkey', 'local_skillradar'),
         get_string('displayname', 'local_skillradar'),
-        get_string('color', 'local_skillradar'),
         get_string('warning', 'local_skillradar'),
         '',
     ];
@@ -146,12 +152,12 @@ if ($definitions) {
             '<input type="hidden" name="defid" value="' . (int)$definition->id . '" />' .
             '<button class="btn btn-link p-0" type="submit">' . get_string('delete') . '</button></form>';
         $table->data[] = [
-            html_writer::div(s($definition->skill_key), '', ['data-skill-key' => s($definition->skill_key)]),
+            html_writer::div(
+                s($definition->skill_key),
+                '',
+                ['data-skill-key' => s($definition->skill_key), 'data-skill-color' => s($definition->color)]
+            ),
             html_writer::div(s($definition->displayname), '', ['data-skill-name' => s($definition->displayname)]),
-            html_writer::empty_tag('span', [
-                'data-skill-color' => s($definition->color),
-                'style' => 'display:inline-block;width:24px;height:24px;border-radius:4px;background:' . s($definition->color) . ';',
-            ]),
             $warning,
             $deleteform,
         ];
@@ -163,7 +169,6 @@ echo html_writer::tag('h3', get_string('sectionsettings', 'local_skillradar'));
 echo '<form method="post" action="' . s($PAGE->url->out(false)) . '" class="mb-4">';
 echo '<input type="hidden" name="sesskey" value="' . sesskey() . '" />';
 echo '<input type="hidden" name="action" value="saveconfig" />';
-$cfg = \local_skillradar\manager::get_course_config($courseid);
 $options = [
     'average' => get_string('overallaverage', 'local_skillradar'),
     'final' => get_string('overallfinal', 'local_skillradar'),
@@ -176,6 +181,10 @@ echo '<div class="mb-3"><label class="form-label" for="id_overallmode">' . get_s
     html_writer::tag('select', $selectoptions, ['name' => 'overallmode', 'id' => 'id_overallmode', 'class' => 'form-select']) .
     '</div>';
 echo '<p class="text-muted small mb-3">' . get_string('minaxesauto', 'local_skillradar') . '</p>';
+echo '<div class="mb-3"><label class="form-label" for="id_primarycolor">' . get_string('primarycolor', 'local_skillradar') . '</label>' .
+    '<input class="form-control form-control-color" type="color" name="primarycolor" id="id_primarycolor" value="' .
+    s($cfg->primarycolor ?? '#3B82F6') . '" />' .
+    '<p class="text-muted small mt-1 mb-0">' . get_string('primarycolor_help', 'local_skillradar') . '</p></div>';
 echo '<div class="form-check mb-2"><input class="form-check-input" type="checkbox" name="courseavg" value="1" id="id_courseavg" ' . (!empty($cfg->courseavg) ? 'checked' : '') . ' />' .
     '<label class="form-check-label" for="id_courseavg">' . get_string('courseavg', 'local_skillradar') . '</label></div>';
 echo '<button class="btn btn-secondary" type="submit">' . get_string('savechanges') . '</button>';

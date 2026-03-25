@@ -1,5 +1,5 @@
 // This file is part of Moodle - http://moodle.org/
-/* global Chart */
+/* global Chart, localSkillRadarCreateArcPlugin */
 
 (function() {
     'use strict';
@@ -86,16 +86,48 @@
         return Array.prototype.slice.call(document.querySelectorAll('[data-skill-key]')).map(function(node) {
             var row = node.closest('tr');
             var nameEl = row && row.querySelector('[data-skill-name]');
-            var colorEl = row && row.querySelector('[data-skill-color]');
             return {
                 key: node.getAttribute('data-skill-key') || '',
                 label: nameEl ? nameEl.getAttribute('data-skill-name') : node.textContent.trim(),
-                color: colorEl ? colorEl.getAttribute('data-skill-color') : '#64748B'
+                color: node.getAttribute('data-skill-color') || '#64748B'
             };
         });
     }
 
-    function buildFormPreviewPayload(strings) {
+    function hexToRgb(hex) {
+        var m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex || '');
+        return m ? {
+            r: parseInt(m[1], 16),
+            g: parseInt(m[2], 16),
+            b: parseInt(m[3], 16)
+        } : {r: 59, g: 130, b: 246};
+    }
+
+    function hexToRgba(hex, a) {
+        var o = hexToRgb(hex);
+        return 'rgba(' + o.r + ',' + o.g + ',' + o.b + ',' + a + ')';
+    }
+
+    function applyPrimaryColor(root, hex) {
+        if (!root || !hex) {
+            return;
+        }
+        var rgb = hexToRgb(hex);
+        root.style.setProperty('--sr-primary', hex);
+        root.style.setProperty('--sr-primary-muted', 'rgba(' + rgb.r + ',' + rgb.g + ',' + rgb.b + ',0.72)');
+    }
+
+    function resolvePrimaryColor(payload, fallback) {
+        if (payload && payload.primaryColor) {
+            return payload.primaryColor;
+        }
+        if (payload && payload.config && payload.config.primaryColor) {
+            return payload.config.primaryColor;
+        }
+        return fallback || '#3B82F6';
+    }
+
+    function buildFormPreviewPayload(strings, primaryHex) {
         var defs = collectSkillDefinitions();
         var counts = {};
         defs.forEach(function(def) {
@@ -122,6 +154,7 @@
         }), strings);
 
         return {
+            primaryColor: primaryHex || '#3B82F6',
             'skills_detail': detail,
             chart: {
                 labels: detail.map(function(row) {
@@ -227,31 +260,39 @@
 
     function buildDatasets(payload, ctx) {
         var canvas = ctx.canvas;
+        var primary = resolvePrimaryColor(payload, null);
         var gradient = ctx.createLinearGradient(0, 0, canvas.width || 600, canvas.height || 600);
-        gradient.addColorStop(0, 'rgba(54, 162, 235, 0.24)');
-        gradient.addColorStop(1, 'rgba(54, 162, 235, 0.08)');
+        gradient.addColorStop(0, hexToRgba(primary, 0.24));
+        gradient.addColorStop(1, hexToRgba(primary, 0.08));
 
         var hasUserValues = (payload.chart && payload.chart.values ? payload.chart.values : []).some(function(value) {
             return value !== null;
         });
 
+        var chartVals = payload.chart && payload.chart.values ? payload.chart.values : [];
+        var solid = hexToRgba(primary, 1);
         return [{
             label: 'Skill level (%)',
-            data: (payload.chart && payload.chart.values ? payload.chart.values : []).map(function(value) {
+            data: chartVals.map(function(value) {
                 return value === null ? 0 : value;
             }),
+            radarArcSegments: true,
+            radarArcStrokeWidth: 2.4,
             backgroundColor: hasUserValues ? gradient : 'rgba(148, 163, 184, 0.08)',
-            borderColor: hasUserValues ? 'rgba(54, 162, 235, 1)' : 'rgba(148, 163, 184, 0.95)',
+            borderColor: hasUserValues ? solid : 'rgba(148, 163, 184, 0.95)',
             borderDash: hasUserValues ? [] : [6, 6],
-            pointBackgroundColor: hasUserValues ? 'rgba(54, 162, 235, 1)' : 'rgba(148, 163, 184, 0.95)',
+            pointBackgroundColor: hasUserValues ? solid : 'rgba(148, 163, 184, 0.95)',
             pointBorderColor: '#fff',
             pointHoverBackgroundColor: '#fff',
-            pointHoverBorderColor: hasUserValues ? 'rgba(54, 162, 235, 1)' : 'rgba(148, 163, 184, 0.95)',
+            pointHoverBorderColor: hasUserValues ? solid : 'rgba(148, 163, 184, 0.95)',
             pointRadius: hasUserValues ? 3 : 2,
             pointHoverRadius: 4,
-            borderWidth: 2.4,
-            tension: 0.32,
-            fill: true
+            borderWidth: 0,
+            fill: false,
+            tension: 0,
+            radarWaveNoise: hasUserValues,
+            radarWaveAmp: 0.034,
+            radarWaveShadowColor: hasUserValues ? solid : undefined
         }];
     }
 
@@ -260,7 +301,7 @@
             return;
         }
         var percent = payload.overall && payload.overall.percent !== null ? payload.overall.percent : null;
-        var letter = payload.overall && payload.overall.letter ? payload.overall.letter : getRank(percent);
+        var letter = getRank(percent);
         if (showPercentage) {
             buttonNode.classList.remove('rank-mode');
             valueNode.textContent = percent === null ? '—' : Math.round(percent) + '%';
@@ -366,7 +407,9 @@
                     duration: 700
                 }
             },
-            plugins: [centerHtmlPlugin]
+            plugins: typeof localSkillRadarCreateArcPlugin === 'function' ?
+                [centerHtmlPlugin, localSkillRadarCreateArcPlugin()] :
+                [centerHtmlPlugin]
         });
 
         updateCenterScore(payload, centerElements.value, centerElements.label, centerElements.button);
@@ -412,15 +455,22 @@
         }
 
         function updatePreview() {
-            var fallback = buildFormPreviewPayload(strings);
+            var cfg = readConfig(root);
+            var picker = document.getElementById('id_primarycolor');
+            if (picker && picker.value) {
+                cfg.primaryColor = picker.value;
+            }
+            applyPrimaryColor(root, cfg.primaryColor || '#3B82F6');
+            var fallback = buildFormPreviewPayload(strings, cfg.primaryColor);
             renderJsonDebug(jsondebug, {
                 mode: 'form-preview',
-                config: config,
+                config: cfg,
                 fallback: fallback
             });
-            fetchPayload(config).then(function(payload) {
+            fetchPayload(cfg).then(function(payload) {
                 payload.strings = Object.assign({}, strings, payload.strings || {});
                 var output = hasRealGrades(payload) ? payload : fallback;
+                applyPrimaryColor(root, resolvePrimaryColor(output, cfg.primaryColor));
                 renderChart(canvas, output, {
                     button: centerButton,
                     value: centerValue,
@@ -430,7 +480,7 @@
                 renderTextDebug(textdebug, output);
                 renderJsonDebug(jsondebug, {
                     mode: hasRealGrades(payload) ? 'api-grades' : 'form-preview-fallback',
-                    config: config,
+                    config: cfg,
                     payload: payload,
                     fallback: fallback
                 });
@@ -439,6 +489,7 @@
                 }
                 return payload;
             }).catch(function() {
+                applyPrimaryColor(root, resolvePrimaryColor(fallback, cfg.primaryColor));
                 renderChart(canvas, fallback, {
                     button: centerButton,
                     value: centerValue,
@@ -448,7 +499,7 @@
                 renderTextDebug(textdebug, fallback);
                 renderJsonDebug(jsondebug, {
                     mode: 'fetch-fallback',
-                    config: config,
+                    config: cfg,
                     fallback: fallback
                 });
                 if (loading) {
@@ -459,7 +510,7 @@
         }
 
         document.addEventListener('change', function(event) {
-            if (event.target.matches('select[name^="skill_"], input[name^="weight_"]')) {
+            if (event.target.matches('select[name^="skill_"], input[name^="weight_"], #id_primarycolor')) {
                 if (loading) {
                     loading.style.display = 'block';
                 }

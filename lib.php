@@ -4,7 +4,7 @@
 defined('MOODLE_INTERNAL') || die();
 
 function local_skillradar_get_report_page_config(): array {
-    global $PAGE, $USER;
+    global $PAGE, $SESSION, $USER;
 
     $path = $PAGE->url->get_path(false);
     // On grade reports, URL param "id" is the course id. On most other pages (e.g. mod/quiz/view.php)
@@ -33,9 +33,26 @@ function local_skillradar_get_report_page_config(): array {
     }
 
     if ($isuserreport) {
-        $userid = (int)optional_param('userid', 0, PARAM_INT);
-        if ($userid < 1) {
-            $userid = (int)$USER->id;
+        // Match gradereport/user/index.php: userid may be absent from URL while the report uses
+        // $SESSION->gradereport_user["useritem-{$context->id}"] for the selected student.
+        $useridparam = optional_param('userid', null, PARAM_INT);
+        if ($useridparam !== null && $useridparam > 0) {
+            $userid = (int)$useridparam;
+        } else if ($useridparam === 0) {
+            // Teacher "all users" report mode — no single user for the radar.
+            $userid = 0;
+        } else {
+            if (has_capability('moodle/grade:viewall', $context)) {
+                $sesskey = 'useritem-' . $context->id;
+                $lastviewed = $SESSION->gradereport_user[$sesskey] ?? null;
+                if ($lastviewed !== null && (int)$lastviewed > 0) {
+                    $userid = (int)$lastviewed;
+                } else {
+                    $userid = 0;
+                }
+            } else {
+                $userid = (int)$USER->id;
+            }
         }
         $canview = has_capability('local/skillradar:view', $context) ||
             has_capability('local/skillradar:manage', $context) ||
@@ -65,11 +82,13 @@ function local_skillradar_before_http_headers() {
 
     $assetrev = (string)max(
         @filemtime(__DIR__ . '/js/chart.umd.min.js') ?: 0,
+        @filemtime(__DIR__ . '/js/radar_arc_plugin.js') ?: 0,
         @filemtime(__DIR__ . '/js/script.js') ?: 0,
         @filemtime(__DIR__ . '/styles/radar.css') ?: 0
     );
     $PAGE->requires->css(new moodle_url('/local/skillradar/styles/radar.css', ['v' => $assetrev]));
     $PAGE->requires->js(new moodle_url('/local/skillradar/js/chart.umd.min.js', ['v' => $assetrev]), true);
+    $PAGE->requires->js(new moodle_url('/local/skillradar/js/radar_arc_plugin.js', ['v' => $assetrev]), true);
     $PAGE->requires->js(new moodle_url('/local/skillradar/js/script.js', ['v' => $assetrev]), true);
 }
 
@@ -96,10 +115,13 @@ function local_skillradar_before_footer() {
 
     $context = context_course::instance($courseid);
     $userid = (int)$pageconfig['userid'];
+    $coursecfg = \local_skillradar\manager::get_course_config($courseid);
+    $primary = $coursecfg->primarycolor ?? '#3B82F6';
     $config = [
         'courseId' => $courseid,
         'userId' => $userid,
         'reportType' => $pageconfig['type'],
+        'primaryColor' => $primary,
         'apiUrl' => (new moodle_url('/local/skillradar/api.php'))->out(false),
         'sesskey' => sesskey(),
         'strings' => [
