@@ -1,0 +1,114 @@
+<?php
+// This file is part of Moodle - http://moodle.org/
+
+namespace local_skillradar;
+
+defined('MOODLE_INTERNAL') || die();
+
+use cache;
+use stdClass;
+
+class manager {
+    public const TABLE_MAP = 'local_skillradar_map';
+    public const TABLE_DEF = 'local_skillradar_def';
+    public const TABLE_CFG = 'local_skillradar_cfg';
+
+    public static function get_course_config(int $courseid): stdClass {
+        global $DB;
+        $record = $DB->get_record(self::TABLE_CFG, ['courseid' => $courseid]);
+        if ($record) {
+            return $record;
+        }
+        return (object)[
+            'courseid' => $courseid,
+            'overallmode' => 'average',
+            'courseavg' => 0,
+        ];
+    }
+
+    public static function save_course_config(stdClass $data): void {
+        global $DB;
+        $now = time();
+        $existing = $DB->get_record(self::TABLE_CFG, ['courseid' => $data->courseid]);
+        if ($existing) {
+            $data->id = $existing->id;
+            $data->timemodified = $now;
+            $DB->update_record(self::TABLE_CFG, $data);
+            return;
+        }
+        $data->timecreated = $now;
+        $data->timemodified = $now;
+        $DB->insert_record(self::TABLE_CFG, $data);
+    }
+
+    public static function get_definitions(int $courseid): array {
+        global $DB;
+        return $DB->get_records(self::TABLE_DEF, ['courseid' => $courseid], 'sortorder ASC, id ASC');
+    }
+
+    public static function get_mappings(int $courseid): array {
+        global $DB;
+        return $DB->get_records(self::TABLE_MAP, ['courseid' => $courseid], 'id ASC');
+    }
+
+    public static function replace_mappings(int $courseid, array $rows): void {
+        global $DB;
+        $DB->delete_records(self::TABLE_MAP, ['courseid' => $courseid]);
+        $now = time();
+        foreach ($rows as $row) {
+            $row->courseid = $courseid;
+            $row->timecreated = $now;
+            $row->timemodified = $now;
+            $DB->insert_record(self::TABLE_MAP, $row);
+        }
+    }
+
+    public static function purge_stale_mappings(int $courseid): void {
+        global $DB;
+        $sql = "SELECT m.id
+                  FROM {" . self::TABLE_MAP . "} m
+             LEFT JOIN {grade_items} gi ON gi.id = m.gradeitemid
+                 WHERE m.courseid = :courseid
+                   AND gi.id IS NULL";
+        $ids = $DB->get_fieldset_sql($sql, ['courseid' => $courseid]);
+        foreach ($ids as $id) {
+            $DB->delete_records(self::TABLE_MAP, ['id' => $id]);
+        }
+    }
+
+    public static function count_items_per_skill(int $courseid): array {
+        global $DB;
+        $sql = "SELECT skill_key, COUNT(*) AS itemcount
+                  FROM {" . self::TABLE_MAP . "}
+                 WHERE courseid = :courseid
+              GROUP BY skill_key";
+        return $DB->get_records_sql_menu($sql, ['courseid' => $courseid]);
+    }
+
+    public static function find_preview_userid(int $courseid): int {
+        global $DB, $USER;
+        $sql = "SELECT DISTINCT gg.userid
+                  FROM {grade_grades} gg
+                  JOIN {grade_items} gi ON gi.id = gg.itemid
+                 WHERE gi.courseid = :courseid
+                   AND gg.finalgrade IS NOT NULL
+              ORDER BY gg.userid ASC";
+        $userid = (int)$DB->get_field_sql($sql, ['courseid' => $courseid], IGNORE_MULTIPLE);
+        return $userid > 0 ? $userid : (int)$USER->id;
+    }
+
+    public static function invalidate_course_cache(int $courseid): void {
+        $cache = cache::make('local_skillradar', 'skillpayload');
+        $cache->purge();
+    }
+
+    public static function invalidate_user_cache(int $courseid, int $userid): void {
+        $cache = cache::make('local_skillradar', 'skillpayload');
+        $cache->delete(self::cache_key($courseid, $userid));
+        $cache->delete(self::cache_key($courseid, $userid) . '_avg');
+    }
+
+    public static function cache_key(int $courseid, int $userid): string {
+        return 'c' . $courseid . '_u' . $userid;
+    }
+}

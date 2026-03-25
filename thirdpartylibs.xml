@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<libraries>
+  <library>
+    <location>js/chart.umd.min.js</location>
+    <name>Chart.js</name>
+    <version>4.4.2</version>
+    <license>MIT</license>
+  </library>
+</libraries>
