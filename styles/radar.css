@@ -31,6 +31,12 @@
     gap: 1rem;
 }
 
+.local-skillradar-section--spaced {
+    margin-top: 1.5rem;
+    padding-top: 1rem;
+    border-top: 1px solid rgba(148, 163, 184, 0.35);
+}
+
 .local-skillradar-body > .local-skillradar-debug-api-wrap,
 .local-skillradar-body > .local-skillradar-debug-legacy-wrap {
     grid-column: 1 / -1;
@@ -136,7 +142,8 @@ details[open] > .local-skillradar-chart-debug-summary::before {
 }
 
 .local-skillradar-chartwrap--quizmod,
-.local-skillradar-chartwrap--course {
+.local-skillradar-chartwrap--course,
+.local-skillradar-chartwrap--local {
     min-height: 320px;
     height: min(520px, 80vw);
 }

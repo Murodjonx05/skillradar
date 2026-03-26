@@ -281,6 +281,7 @@ function local_skillradar_render_grade_report_panel(): string {
             'radarQuizModulesDataset' => get_string('radarquizmodulesdataset', 'local_skillradar'),
             'radarQuestionSkillsDataset' => get_string('radarquestionskillsdataset', 'local_skillradar'),
             'radarCourseSkillsDataset' => get_string('radarcourseskillsdataset', 'local_skillradar'),
+            'radarLocalSkillsDataset' => get_string('radarlocalskillsdataset', 'local_skillradar'),
             'radarQuizModulesAvg' => get_string('radarquizmodulesavg', 'local_skillradar'),
             'chartdebugCourseTitle' => get_string('chartdebug_course_title', 'local_skillradar'),
             'chartdebugFullTitle' => get_string('chartdebug_full_title', 'local_skillradar'),
@@ -290,6 +291,8 @@ function local_skillradar_render_grade_report_panel(): string {
             'chartdebugOverall' => get_string('chartdebug_overall', 'local_skillradar'),
             'chartdebugChartjs' => get_string('chartdebug_chartjs', 'local_skillradar'),
             'chartdebugNoPayload' => get_string('chartdebug_no_payload', 'local_skillradar'),
+            'radarLocalSubtitle' => get_string('radarlocalsubtitle', 'local_skillradar'),
+            'radarLocalQuizPrefix' => get_string('radarlocalquizprefix', 'local_skillradar'),
         ],
         'debugSkillRadar' => $debugskillradar,
         'chartDebug' => $chartdebug,
@@ -336,6 +339,19 @@ function local_skillradar_render_grade_report_panel(): string {
         ($chartdebug ? local_skillradar_chart_debug_block('course') : ''),
         'local-skillradar-section local-skillradar-section--course'
     );
+    $chartwraplocal = html_writer::div(
+        html_writer::tag('canvas', '', ['id' => 'local-skillradar-canvas-local']),
+        'local-skillradar-chartwrap local-skillradar-chartwrap--local'
+    );
+    $sectionlocal = html_writer::div(
+        html_writer::tag('h5', get_string('radarsectionsinglequiz', 'local_skillradar'), ['class' => 'local-skillradar-section-title']) .
+        html_writer::div(get_string('radarlocalsubtitle', 'local_skillradar'), 'text-muted small mb-1', ['id' => 'local-skillradar-local-intro']) .
+        html_writer::div('', 'text-muted small fw-semibold mb-2', ['id' => 'local-skillradar-quiz-name']) .
+        $chartwraplocal .
+        html_writer::div('', 'local-skillradar-local-overall text-muted small mb-1', ['id' => 'local-skillradar-local-overall']) .
+        html_writer::div('', 'local-skillradar-results', ['id' => 'local-skillradar-results-local']),
+        'local-skillradar-section local-skillradar-section--local local-skillradar-section--spaced'
+    );
     $debugblocks = '';
     if ($debugskillradar) {
         $debugblocks = html_writer::div(
@@ -358,7 +374,7 @@ function local_skillradar_render_grade_report_panel(): string {
         );
     }
     $body = html_writer::div(
-        $sectioncourse . $fulldebug . $debugblocks,
+        $sectioncourse . $sectionlocal . $fulldebug . $debugblocks,
         'local-skillradar-body'
     );
 
@@ -369,7 +385,9 @@ function local_skillradar_render_grade_report_panel(): string {
     ) . html_writer::script(
         "(function() {" .
         "var results = document.getElementById('local-skillradar-results');" .
+        "var resultsLocal = document.getElementById('local-skillradar-results-local');" .
         "if (results && !results.innerHTML) { results.innerHTML = '<p class=\"local-skillradar-results-empty\">Bootstrapping...</p>'; }" .
+        "if (resultsLocal && !resultsLocal.innerHTML) { resultsLocal.innerHTML = '<p class=\"local-skillradar-results-empty\">Bootstrapping...</p>'; }" .
         "function run() {" .
         "if (window.localSkillRadarBoot) {" .
         "window.localSkillRadarBoot();" .

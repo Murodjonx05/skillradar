@@ -20,8 +20,10 @@ class grade_provider {
      * @return array
      */
     public static function get_course_skill_radar(int $userid, int $courseid, bool $includecourseaverage = false): array {
-        $config = manager::get_course_config($courseid);
         $detail = self::build_skill_rows($courseid, $userid);
+        if ($detail === []) {
+            return self::empty_tagged_radar_payload($courseid, $includecourseaverage);
+        }
         return self::payload_from_detail($courseid, $detail, $includecourseaverage);
     }
 
@@ -104,21 +106,95 @@ class grade_provider {
     }
 
     /**
+     * Radar uses only skills from «Skill Radar» question keys (local_skillradar_def.id), not bank category fallbacks.
+     *
      * @param int $courseid
-     * @param int $userid
+     * @param bool $includecourseaverage
      * @return array
      */
+    private static function empty_tagged_radar_payload(int $courseid, bool $includecourseaverage): array {
+        $config = manager::get_course_config($courseid);
+        $payload = [
+            'skills' => [],
+            'skills_detail' => [],
+            'mapping_meta' => [],
+            'chart' => null,
+            'overall' => ['percent' => null, 'letter' => null],
+            'primaryColor' => $config->primarycolor ?? '#3B82F6',
+            'config' => [
+                'overallmode' => $config->overallmode ?? 'average',
+                'minaxes' => 0,
+                'primaryColor' => $config->primarycolor ?? '#3B82F6',
+            ],
+            'empty_tagged_skills' => true,
+            'empty_message' => get_string('radar_tagged_skills_empty', 'local_skillradar'),
+        ];
+        if ($includecourseaverage && !empty($config->courseavg)) {
+            $payload['course_average'] = null;
+        }
+        return $payload;
+    }
+
     /**
-     * Exposed for hybrid merge: quiz category axes from materialized tables only.
+     * Top (global) chart: no skill defs and no grade-item mappings — cannot use gradebook radar.
+     *
+     * @param int $courseid
+     * @param bool $includecourseaverage
+     * @return array
+     */
+    public static function get_empty_global_gradebook_radar_payload(int $courseid, bool $includecourseaverage = false): array {
+        $config = manager::get_course_config($courseid);
+        $payload = [
+            'skills' => [],
+            'skills_detail' => [],
+            'mapping_meta' => [],
+            'chart' => null,
+            'overall' => ['percent' => null, 'letter' => null],
+            'primaryColor' => $config->primarycolor ?? '#3B82F6',
+            'config' => [
+                'overallmode' => $config->overallmode ?? 'average',
+                'minaxes' => 0,
+                'primaryColor' => $config->primarycolor ?? '#3B82F6',
+            ],
+            'empty_global_gradebook' => true,
+            'empty_message' => get_string('radar_global_gradebook_empty', 'local_skillradar'),
+        ];
+        if ($includecourseaverage && !empty($config->courseavg)) {
+            $payload['course_average'] = null;
+        }
+
+        return $payload;
+    }
+
+    /**
+     * Exposed for hybrid merge: any materialized rows (includes category fallback skills).
      *
      * @param int $courseid
      * @param int $userid
      * @return array
      */
     public static function get_materialized_skill_rows(int $courseid, int $userid): array {
-        return self::build_skill_rows($courseid, $userid);
+        global $DB;
+
+        $sql = "SELECT skillid
+                  FROM {local_skill_user_result}
+                 WHERE courseid = :courseid
+                   AND userid = :userid
+                   AND aggregation_strategy = :strategy";
+        return $DB->get_records_sql($sql, [
+            'courseid' => $courseid,
+            'userid' => $userid,
+            'strategy' => cache_manager::STRATEGY_LATEST,
+        ]);
     }
 
+    /**
+     * Course radar: only skills tied to a defined skill key on questions (positive skillid = def.id).
+     *
+     * @param int $courseid
+     * @param int $userid
+     * @return array
+     */
     private static function build_skill_rows(int $courseid, int $userid): array {
         global $DB;
 
@@ -131,8 +207,8 @@ class grade_provider {
                  WHERE courseid = :courseid
                    AND userid = :userid
                    AND aggregation_strategy = :strategy
-              GROUP BY skillid
-              ORDER BY MAX(skillname) ASC, skillid ASC";
+                   AND skillid > 0
+              GROUP BY skillid";
         $records = $DB->get_records_sql($sql, [
             'courseid' => $courseid,
             'userid' => $userid,
@@ -155,7 +231,7 @@ class grade_provider {
             ];
         }
 
-        return $rows;
+        return self::finalize_tagged_skill_rows($courseid, $rows);
     }
 
     /**
@@ -177,6 +253,7 @@ class grade_provider {
                    AND userid = :userid
                    AND quizid = :quizid
                    AND aggregation_strategy = :strategy
+                   AND skillid > 0
               ORDER BY skillname ASC, skillid ASC";
         $records = $DB->get_records_sql($sql, [
             'courseid' => $courseid,
@@ -200,6 +277,76 @@ class grade_provider {
                 'maxearned' => round((float)$record->maxearned, 5),
             ];
         }
+
+        return self::finalize_tagged_skill_rows($courseid, $rows);
+    }
+
+    /**
+     * Use course skill display names (not keys) and definition sort order for radar axes.
+     *
+     * @param int $courseid
+     * @param array $rows
+     * @return array
+     */
+    private static function finalize_tagged_skill_rows(int $courseid, array $rows): array {
+        if ($rows === []) {
+            return [];
+        }
+
+        $defbyid = [];
+        foreach (manager::get_definitions($courseid) as $def) {
+            $defbyid[(int)$def->id] = $def;
+        }
+
+        foreach ($rows as &$row) {
+            $sid = (int)$row['key'];
+            if ($sid > 0 && isset($defbyid[$sid])) {
+                $row['label'] = format_string($defbyid[$sid]->displayname);
+                if (!empty($defbyid[$sid]->color)) {
+                    $row['color'] = $defbyid[$sid]->color;
+                }
+            }
+        }
+        unset($row);
+
+        usort($rows, static function(array $a, array $b) use ($defbyid): int {
+            $ida = (int)$a['key'];
+            $idb = (int)$b['key'];
+            $oa = ($ida > 0 && isset($defbyid[$ida])) ? (int)$defbyid[$ida]->sortorder : 999999;
+            $ob = ($idb > 0 && isset($defbyid[$idb])) ? (int)$defbyid[$idb]->sortorder : 999999;
+            if ($oa !== $ob) {
+                return $oa <=> $ob;
+            }
+            return strcmp((string)$a['label'], (string)$b['label']);
+        });
+
+        return self::dedupe_duplicate_axis_labels($rows);
+    }
+
+    /**
+     * @param array $rows
+     * @return array
+     */
+    private static function dedupe_duplicate_axis_labels(array $rows): array {
+        $labels = [];
+        foreach ($rows as $row) {
+            if (!empty($row['placeholder'])) {
+                continue;
+            }
+            $labels[] = trim((string)($row['label'] ?? ''));
+        }
+        $counts = array_count_values($labels);
+        foreach ($rows as &$row) {
+            if (!empty($row['placeholder'])) {
+                continue;
+            }
+            $lab = trim((string)($row['label'] ?? ''));
+            if (($counts[$lab] ?? 0) > 1) {
+                $k = trim((string)($row['key'] ?? ''));
+                $row['label'] = $lab . ' · ' . ($k !== '' ? $k : '?');
+            }
+        }
+        unset($row);
 
         return $rows;
     }
@@ -314,6 +461,7 @@ class grade_provider {
                   FROM {local_skill_user_result}
                  WHERE courseid = :courseid
                    AND aggregation_strategy = :strategy
+                   AND skillid > 0
               GROUP BY skillid";
         $byvalues = [];
         $recordset = $DB->get_records_sql($sql, [

@@ -58,7 +58,7 @@ $base = \local_skillradar\manager::cache_key($courseid, $userid);
 $key = $base . ($withavg ? '_avg' : '');
 
 $payload = $cache->get($key);
-if ($payload === false || !isset($payload['course_skills_radar'])) {
+if ($payload === false || !isset($payload['course_skills_radar']) || !isset($payload['local_skills_radar'])) {
     $payload = \local_skillradar\hybrid_provider::get_course_skill_radar($userid, $courseid, (bool)$withavg);
     $cache->set($key, $payload);
 }

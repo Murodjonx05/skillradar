@@ -5,6 +5,7 @@
     'use strict';
 
     var chartHolderSkills = {inst: null};
+    var chartHolderLocal = {inst: null};
     var showPercentage = true;
 
     var C = window.localSkillRadarCommon;
@@ -21,11 +22,23 @@
     var applyPrimaryColor = C.applyPrimaryColor;
     var resolvePrimaryColor = C.resolvePrimaryColor;
 
+    function formatPercentValue(val) {
+        if (val === null || typeof val === 'undefined' || val === '') {
+            return '—';
+        }
+        var n = Number(val);
+        if (isNaN(n)) {
+            return '—';
+        }
+        return n.toFixed(2) + '%';
+    }
+
     function renderResults(container, payload) {
         if (!container) {
             return;
         }
-        if (payload && payload.empty_single_quiz && payload.empty_message) {
+        if (payload && payload.empty_message &&
+                (payload.empty_single_quiz || payload.empty_tagged_skills || payload.empty_global_gradebook)) {
             container.innerHTML = '<p class="local-skillradar-results-empty">' + escapeHtml(payload.empty_message) + '</p>';
             return;
         }
@@ -53,7 +66,7 @@
                 '<span class="local-skillradar-result-dot" style="background:' + safeHexColor(row.color) + ';"></span>' +
                 '<span class="local-skillradar-result-label">' + escapeHtml(row.label) + '</span>' +
                 '<span class="local-skillradar-result-value">' +
-                (row.value === null ? '—' : row.value.toFixed(2) + '%') +
+                formatPercentValue(row.value) +
                 '</span>' +
                 '</div>';
         });
@@ -72,7 +85,7 @@
         }
         container.innerHTML = rows.map(function(row) {
             return '<p><strong>' + escapeHtml(row.label) + '</strong>: ' +
-                (row.value === null ? '—' : row.value.toFixed(2) + '%') +
+                formatPercentValue(row.value) +
                 ' | items=' + row.items +
                 ' | empty=' + (row.empty ? 'true' : 'false') +
                 ' | placeholder=' + (row.placeholder ? 'true' : 'false') +
@@ -176,11 +189,16 @@
             metaFull.innerHTML = buildFullMetaHtml(payload, requestUrl, userId, config.courseId, strings);
         }
         if (jsonFull) {
-            jsonFull.textContent = JSON.stringify(payload, null, 2);
+            try {
+                jsonFull.textContent = JSON.stringify(payload, null, 2);
+            } catch (e) {
+                jsonFull.textContent = '(JSON.stringify failed: ' + String(e && e.message ? e.message : e) + ')';
+            }
         }
 
         window.setTimeout(function() {
             updateChartJsDebug(chartHolderSkills.inst, 'course');
+            updateChartJsDebug(chartHolderLocal.inst, 'local');
         }, 0);
     }
 
@@ -396,7 +414,8 @@
             };
         }
 
-        chartHolder.inst = new Chart(context, {
+        try {
+            chartHolder.inst = new Chart(context, {
             type: 'radar',
             data: {
                 labels: labels,
@@ -445,6 +464,17 @@
             },
             plugins: chartPlugins
         });
+        } catch (err) {
+            if (chartHolder.inst) {
+                try {
+                    chartHolder.inst.destroy();
+                } catch (ignore) {
+                    void 0;
+                }
+                chartHolder.inst = null;
+            }
+            return;
+        }
 
         if (useCenter && centerElements.value) {
             updateCenterScore(payload, centerElements.value, centerElements.label, centerElements.button);
@@ -470,9 +500,13 @@
         var textdebug = document.getElementById('local-skillradar-text');
         var jsondebug = document.getElementById('local-skillradar-json');
         var canvas = document.getElementById('local-skillradar-canvas');
+        var canvasLocal = document.getElementById('local-skillradar-canvas-local');
         var centerButton = document.getElementById('local-skillradar-center-score');
         var centerValue = document.getElementById('local-skillradar-score-value');
         var centerLabel = document.getElementById('local-skillradar-score-label');
+        var resultsLocal = document.getElementById('local-skillradar-results-local');
+        var localOverallEl = document.getElementById('local-skillradar-local-overall');
+        var quizNameEl = document.getElementById('local-skillradar-quiz-name');
         var lastPayload = null;
 
         if (centerButton && !centerButton.getAttribute('data-bound')) {
@@ -491,6 +525,10 @@
                 chartHolderSkills.inst.destroy();
                 chartHolderSkills.inst = null;
             }
+            if (chartHolderLocal.inst) {
+                chartHolderLocal.inst.destroy();
+                chartHolderLocal.inst = null;
+            }
             if (centerValue) {
                 centerValue.textContent = '—';
             }
@@ -503,6 +541,12 @@
             if (courseOverallEl) {
                 courseOverallEl.textContent = '';
             }
+            if (localOverallEl) {
+                localOverallEl.textContent = '';
+            }
+            if (quizNameEl) {
+                quizNameEl.textContent = '';
+            }
             showPercentage = true;
         }
 
@@ -512,6 +556,10 @@
             clearChartDebugPanels(config);
             if (results) {
                 results.innerHTML = '<p class="local-skillradar-results-empty">' +
+                    ((config.strings && config.strings.selectStudent) || 'Select student') + '</p>';
+            }
+            if (resultsLocal) {
+                resultsLocal.innerHTML = '<p class="local-skillradar-results-empty">' +
                     ((config.strings && config.strings.selectStudent) || 'Select student') + '</p>';
             }
             if (textdebug) {
@@ -542,15 +590,60 @@
             }
         }
 
+        function renderLocalView(localPayload, strings) {
+            var localLabel = strings.radarLocalSkillsDataset ||
+                strings.radarQuestionSkillsDataset || 'Skill level (%)';
+            if (quizNameEl) {
+                var prefix = (strings.radarLocalQuizPrefix || 'Quiz:') + ' ';
+                var qn = (localPayload && localPayload.local_quiz_name) ? localPayload.local_quiz_name : '—';
+                quizNameEl.textContent = prefix + qn;
+            }
+            if (!canvasLocal) {
+                return;
+            }
+            renderChart(canvasLocal, localPayload, null, chartHolderLocal, localLabel);
+            renderResults(resultsLocal, localPayload);
+            if (localOverallEl) {
+                var lp = localPayload && localPayload.overall && localPayload.overall.percent;
+                localOverallEl.textContent = (lp === null || typeof lp === 'undefined') ? '' :
+                    ((strings.radarQuizModulesAvg || 'Average') + ': ' + Math.round(lp) + '%');
+            }
+        }
+
         function renderLoadedPayload(userId, payload, requestUrl) {
+            if (!payload || typeof payload !== 'object') {
+                handleLoadError(userId);
+                return;
+            }
             payload.strings = Object.assign({}, config.strings || {}, payload.strings || {});
             lastPayload = payload;
             var coursePayload = payload.course_skills_radar;
+            var localPayload = payload.local_skills_radar || null;
             var strings = payload.strings || {};
 
             applyPrimaryColor(panel, resolvePrimaryColor(coursePayload, config.primaryColor));
             renderCourseView(coursePayload, strings);
-            renderChartDebugPanels(config, userId, requestUrl || '', payload);
+            try {
+                renderLocalView(localPayload, strings);
+            } catch (errLocal) {
+                if (chartHolderLocal.inst) {
+                    try {
+                        chartHolderLocal.inst.destroy();
+                    } catch (ignore) {
+                        void 0;
+                    }
+                    chartHolderLocal.inst = null;
+                }
+                if (resultsLocal) {
+                    resultsLocal.innerHTML = '<p class="local-skillradar-results-empty">' +
+                        ((strings.noResults) || 'No data.') + '</p>';
+                }
+            }
+            try {
+                renderChartDebugPanels(config, userId, requestUrl || '', payload);
+            } catch (ignoreDbg) {
+                void 0;
+            }
 
             if (config.debugSkillRadar) {
                 renderTextDebug(textdebug, coursePayload || {});
@@ -568,6 +661,10 @@
             clearChartDebugPanels(config);
             if (results) {
                 results.innerHTML = '<p class="local-skillradar-results-empty">' +
+                    ((config.strings && config.strings.fetchError) || 'Could not load Skill Radar.') + '</p>';
+            }
+            if (resultsLocal) {
+                resultsLocal.innerHTML = '<p class="local-skillradar-results-empty">' +
                     ((config.strings && config.strings.fetchError) || 'Could not load Skill Radar.') + '</p>';
             }
             if (config.debugSkillRadar) {

@@ -11,6 +11,7 @@ defined('MOODLE_INTERNAL') || die();
  * Model: let S be a question set (Moodle: {@see question_categories} — one category can hold many questions).
  * Radar axes are skills (def.skill_key / displayname), not raw set ids. Each question can be tagged with
  * a skill (override); if not, the question’s bank category name is the default skill label (skillid = -categoryid).
+ * The grade-report radar chart lists only tagged skills (positive skillid); category fallbacks are omitted there.
  *
  * 1) Optional course override: {@see manager::TABLE_QMAP} maps question → local_skillradar_def.skill_key.
  * 2) Else: question bank category id + name (negative skillid in storage to avoid collision with def.id).

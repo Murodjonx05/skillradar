@@ -116,6 +116,7 @@ class calculator {
         $mappings = manager::get_mappings($courseid);
 
         $detail = self::build_skill_rows($courseid, $userid, $definitions, $mappings);
+        $detail = self::dedupe_duplicate_axis_labels($detail);
         $chart = self::build_chart_meta($detail);
         $overall = self::compute_overall($courseid, $userid, $config, $detail);
 
@@ -206,6 +207,36 @@ class calculator {
         unset($row);
 
         return array_values($rows);
+    }
+
+    /**
+     * Same display name on several axes makes the radar unreadable — append skill key for duplicates.
+     *
+     * @param array $detail
+     * @return array
+     */
+    private static function dedupe_duplicate_axis_labels(array $detail): array {
+        $labels = [];
+        foreach ($detail as $row) {
+            if (!empty($row['placeholder'])) {
+                continue;
+            }
+            $labels[] = trim((string)($row['label'] ?? ''));
+        }
+        $counts = array_count_values($labels);
+        foreach ($detail as &$row) {
+            if (!empty($row['placeholder'])) {
+                continue;
+            }
+            $lab = trim((string)($row['label'] ?? ''));
+            if (($counts[$lab] ?? 0) > 1) {
+                $k = trim((string)($row['key'] ?? ''));
+                $row['label'] = $lab . ' · ' . ($k !== '' ? $k : '?');
+            }
+        }
+        unset($row);
+
+        return $detail;
     }
 
     protected static function build_skills_map(array $detail): array {
