@@ -37,7 +37,11 @@ class observer {
     }
 
     public static function question_manually_graded(\mod_quiz\event\question_manually_graded $event): void {
-        self::recompute_attempt((int)$event->other['attemptid']);
+        $attemptid = 0;
+        if (!empty($event->other) && array_key_exists('attemptid', $event->other)) {
+            $attemptid = (int)$event->other['attemptid'];
+        }
+        self::recompute_attempt($attemptid);
     }
 
     /**
@@ -69,7 +73,8 @@ class observer {
      * @return void
      */
     public static function question_created(\core\event\question_created $event): void {
-        if ($_SERVER['REQUEST_METHOD'] !== 'POST' || !array_key_exists('skillradar_skill_key', $_POST)) {
+        $requestmethod = $_SERVER['REQUEST_METHOD'] ?? '';
+        if ($requestmethod !== 'POST' || !array_key_exists('skillradar_skill_key', $_POST)) {
             return;
         }
 

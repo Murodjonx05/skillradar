@@ -62,6 +62,10 @@ if (data_submitted() && confirm_sesskey()) {
         if ($def) {
             $DB->delete_records(\local_skillradar\manager::TABLE_DEF, ['id' => $defid]);
             $DB->delete_records(\local_skillradar\manager::TABLE_MAP, ['courseid' => $courseid, 'skill_key' => $def->skill_key]);
+            if (\local_skillradar\manager::qmap_table_exists()) {
+                $DB->delete_records(\local_skillradar\manager::TABLE_QMAP, ['courseid' => $courseid, 'skill_key' => $def->skill_key]);
+            }
+            \local_skillradar\manager::rebuild_course_quiz_attempts($courseid);
             \local_skillradar\manager::invalidate_course_cache($courseid);
         }
     } else if ($action === 'saveconfig') {
