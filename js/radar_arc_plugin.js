@@ -281,7 +281,7 @@
         var meta = chart.getDatasetMeta(datasetIndex);
         var ds = chart.data.datasets[datasetIndex];
         var scale = chart.scales.r;
-        if (meta.hidden || !meta.data || meta.data.length < 2 || !scale) {
+        if (meta.hidden || !meta.data || !scale) {
             return;
         }
 
@@ -292,8 +292,39 @@
         var pts = [];
         var i;
         for (i = 0; i < n; i++) {
+            var raw = ds.data[i];
+            if (raw === null || typeof raw === 'undefined' || (typeof raw === 'number' && isNaN(raw))) {
+                continue;
+            }
             var el = meta.data[i];
+            if (!el || el.skip) {
+                continue;
+            }
+            if (!isFinite(el.x) || !isFinite(el.y)) {
+                continue;
+            }
             pts.push({x: el.x, y: el.y});
+        }
+
+        if (pts.length === 0) {
+            return;
+        }
+
+        if (pts.length === 1) {
+            var pr = typeof ds.pointRadius === 'number' ? ds.pointRadius : 6;
+            var r = Math.max(2, Math.min(pr, 10));
+            ctx.save();
+            ctx.beginPath();
+            ctx.arc(pts[0].x, pts[0].y, r, 0, TWO_PI);
+            if (ds.backgroundColor) {
+                ctx.fillStyle = ds.backgroundColor;
+                ctx.fill();
+            }
+            ctx.strokeStyle = ds.borderColor || '#3B82F6';
+            ctx.lineWidth = typeof ds.radarArcStrokeWidth === 'number' ? ds.radarArcStrokeWidth : 2.4;
+            ctx.stroke();
+            ctx.restore();
+            return;
         }
 
         var maxDist = getMaxRadiusPx(scale, pts, cx0, cy0);

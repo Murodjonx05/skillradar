@@ -175,5 +175,10 @@ function xmldb_local_skillradar_upgrade($oldversion) {
         upgrade_plugin_savepoint(true, 2026033128, 'local', 'skillradar');
     }
 
+    if ($oldversion < 2026033138) {
+        \cache::make('local_skillradar', 'skillpayload')->purge();
+        upgrade_plugin_savepoint(true, 2026033138, 'local', 'skillradar');
+    }
+
     return true;
 }

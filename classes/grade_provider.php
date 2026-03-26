@@ -14,6 +14,8 @@ class grade_provider {
     /**
      * Build radar payload from materialized tables only (no quiz/grade-item joins).
      *
+     * One row per skill aggregates earned/max across all quizzes (latest finalized attempt per quiz is pre-materialized).
+     *
      * @param int $userid
      * @param int $courseid
      * @param bool $includecourseaverage optional course-average series for the chart

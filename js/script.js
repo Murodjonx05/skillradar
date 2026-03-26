@@ -241,14 +241,19 @@
 
     function normalizeChartValues(payload) {
         var chartVals = payload.chart && payload.chart.values ? payload.chart.values : [];
+        var placeholder = payload.chart && payload.chart.placeholder ? payload.chart.placeholder : [];
         var hasUserValues = false;
         var userValues = new Array(chartVals.length);
         for (var vi = 0; vi < chartVals.length; vi++) {
+            if (placeholder[vi]) {
+                userValues[vi] = null;
+                continue;
+            }
             var v = chartVals[vi];
-            if (v !== null) {
+            if (v !== null && v !== undefined) {
                 hasUserValues = true;
             }
-            userValues[vi] = v === null ? 0 : v;
+            userValues[vi] = v === null || v === undefined ? 0 : v;
         }
         return {
             hasUserValues: hasUserValues,
@@ -256,10 +261,19 @@
         };
     }
 
+    function pointRadiusForDatum(ctx, hasUserValues, activeRadius, idleRadius) {
+        var d = ctx.dataset.data[ctx.dataIndex];
+        if (d === null || typeof d === 'undefined' || (typeof d === 'number' && isNaN(d))) {
+            return 0;
+        }
+        return hasUserValues ? activeRadius : idleRadius;
+    }
+
     function buildPrimaryDataset(label, values, hasUserValues, gradient, solid) {
         return {
             label: label,
             data: values,
+            spanGaps: false,
             radarArcSegments: true,
             radarArcStrokeWidth: 2.4,
             backgroundColor: hasUserValues ? gradient : 'rgba(148, 163, 184, 0.08)',
@@ -269,8 +283,12 @@
             pointBorderColor: '#fff',
             pointHoverBackgroundColor: '#fff',
             pointHoverBorderColor: hasUserValues ? solid : 'rgba(148, 163, 184, 0.95)',
-            pointRadius: hasUserValues ? 6 : 4,
-            pointHoverRadius: 7,
+            pointRadius: function(ctx) {
+                return pointRadiusForDatum(ctx, hasUserValues, 6, 4);
+            },
+            pointHoverRadius: function(ctx) {
+                return pointRadiusForDatum(ctx, hasUserValues, 7, 5);
+            },
             borderWidth: 0,
             fill: false,
             tension: 0,
@@ -285,12 +303,17 @@
             return null;
         }
 
+        var placeholder = payload.chart && payload.chart.placeholder ? payload.chart.placeholder : [];
         return {
             label: payload.course_average.label ||
                 ((payload.strings && payload.strings.courseAverageLegend) || 'Course average'),
-            data: payload.course_average.values.map(function(value) {
+            data: payload.course_average.values.map(function(value, idx) {
+                if (placeholder[idx]) {
+                    return null;
+                }
                 return value === null ? 0 : value;
             }),
+            spanGaps: false,
             radarArcSegments: true,
             radarArcStrokeWidth: 1.8,
             radarWaveAmp: 0.022,
@@ -300,8 +323,20 @@
             borderColor: 'rgba(100, 116, 139, 0.9)',
             pointBackgroundColor: 'rgba(100, 116, 139, 0.9)',
             pointBorderColor: '#fff',
-            pointRadius: 4,
-            pointHoverRadius: 5,
+            pointRadius: function(ctx) {
+                var d = ctx.dataset.data[ctx.dataIndex];
+                if (d === null || typeof d === 'undefined' || (typeof d === 'number' && isNaN(d))) {
+                    return 0;
+                }
+                return 4;
+            },
+            pointHoverRadius: function(ctx) {
+                var d = ctx.dataset.data[ctx.dataIndex];
+                if (d === null || typeof d === 'undefined' || (typeof d === 'number' && isNaN(d))) {
+                    return 0;
+                }
+                return 5;
+            },
             borderWidth: 0,
             fill: false,
             tension: 0
@@ -594,9 +629,14 @@
             var localLabel = strings.radarLocalSkillsDataset ||
                 strings.radarQuestionSkillsDataset || 'Skill level (%)';
             if (quizNameEl) {
-                var prefix = (strings.radarLocalQuizPrefix || 'Quiz:') + ' ';
-                var qn = (localPayload && localPayload.local_quiz_name) ? localPayload.local_quiz_name : '—';
-                quizNameEl.textContent = prefix + qn;
+                var scopeAll = strings.radarLocalScopeAll || 'All quizzes in this course';
+                if (localPayload && localPayload.local_skills_all_quizzes) {
+                    quizNameEl.textContent = scopeAll;
+                } else if (localPayload && localPayload.local_quiz_name) {
+                    quizNameEl.textContent = (strings.radarLocalQuizPrefix || 'Quiz:') + ' ' + localPayload.local_quiz_name;
+                } else {
+                    quizNameEl.textContent = scopeAll;
+                }
             }
             if (!canvasLocal) {
                 return;

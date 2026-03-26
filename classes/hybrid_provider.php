@@ -6,7 +6,8 @@ namespace local_skillradar;
 defined('MOODLE_INTERNAL') || die();
 
 /**
- * Two radars: (1) global — Moodle gradebook via grade-item→skill mapping; (2) local — per-quiz question skills from materialized attempts.
+ * Two radars: (1) global — Moodle gradebook via grade-item→skill mapping;
+ * (2) local — question-tag skills aggregated across all course quizzes (latest attempt per quiz per skill).
  */
 class hybrid_provider {
     /**
@@ -16,20 +17,10 @@ class hybrid_provider {
      * @return array
      */
     public static function get_course_skill_radar(int $userid, int $courseid, bool $includecourseaverage = false): array {
-        global $DB;
-
         $courseskills = self::build_global_gradebook_radar($userid, $courseid, $includecourseaverage);
 
-        $quizid = manager::default_quiz_id_for_skill_radar($courseid, $userid);
-        $localskills = grade_provider::get_quiz_skill_radar($userid, $courseid, $quizid, false);
-        $localskills['local_quiz_id'] = $quizid;
-        $localskills['local_quiz_name'] = '';
-        if ($quizid > 0) {
-            $quiz = $DB->get_record('quiz', ['id' => $quizid], 'id,name', IGNORE_MISSING);
-            if ($quiz) {
-                $localskills['local_quiz_name'] = format_string($quiz->name);
-            }
-        }
+        $localskills = grade_provider::get_course_skill_radar($userid, $courseid, $includecourseaverage);
+        $localskills['local_skills_all_quizzes'] = true;
 
         return [
             'course_skills_radar' => $courseskills,

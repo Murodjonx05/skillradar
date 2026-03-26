@@ -293,6 +293,7 @@ function local_skillradar_render_grade_report_panel(): string {
             'chartdebugNoPayload' => get_string('chartdebug_no_payload', 'local_skillradar'),
             'radarLocalSubtitle' => get_string('radarlocalsubtitle', 'local_skillradar'),
             'radarLocalQuizPrefix' => get_string('radarlocalquizprefix', 'local_skillradar'),
+            'radarLocalScopeAll' => get_string('radarlocalscopeall', 'local_skillradar'),
         ],
         'debugSkillRadar' => $debugskillradar,
         'chartDebug' => $chartdebug,

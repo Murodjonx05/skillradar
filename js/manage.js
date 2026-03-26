@@ -193,6 +193,28 @@
         });
     }
 
+    /**
+     * @param {Array} chartVals
+     * @param {boolean[]} placeholder
+     * @returns {{mappedVals: Array, hasUserValues: boolean}}
+     */
+    function mapChartValuesWithPlaceholders(chartVals, placeholder) {
+        var hasUserValues = false;
+        var mappedVals = new Array(chartVals.length);
+        for (var vi = 0; vi < chartVals.length; vi++) {
+            if (placeholder[vi]) {
+                mappedVals[vi] = null;
+                continue;
+            }
+            var val = chartVals[vi];
+            if (val !== null && val !== undefined) {
+                hasUserValues = true;
+            }
+            mappedVals[vi] = val === null || val === undefined ? 0 : val;
+        }
+        return {mappedVals: mappedVals, hasUserValues: hasUserValues};
+    }
+
     function buildDatasets(payload, ctx) {
         var canvas = ctx.canvas;
         var primary = resolvePrimaryColor(payload, null);
@@ -201,19 +223,22 @@
         gradient.addColorStop(1, hexToRgba(primary, 0.08));
 
         var chartVals = payload.chart && payload.chart.values ? payload.chart.values : [];
-        var hasUserValues = false;
-        var mappedVals = new Array(chartVals.length);
-        for (var vi = 0; vi < chartVals.length; vi++) {
-            var val = chartVals[vi];
-            if (val !== null) {
-                hasUserValues = true;
-            }
-            mappedVals[vi] = val === null ? 0 : val;
-        }
+        var placeholder = payload.chart && payload.chart.placeholder ? payload.chart.placeholder : [];
+        var mapped = mapChartValuesWithPlaceholders(chartVals, placeholder);
+        var mappedVals = mapped.mappedVals;
+        var hasUserValues = mapped.hasUserValues;
         var solid = hexToRgba(primary, 1);
+        function managePointRadius(ctx, active, idle) {
+            var d = ctx.dataset.data[ctx.dataIndex];
+            if (d === null || typeof d === 'undefined' || (typeof d === 'number' && isNaN(d))) {
+                return 0;
+            }
+            return hasUserValues ? active : idle;
+        }
         var datasets = [{
             label: 'Skill level (%)',
             data: mappedVals,
+            spanGaps: false,
             radarArcSegments: true,
             radarArcStrokeWidth: 2.4,
             backgroundColor: hasUserValues ? gradient : 'rgba(148, 163, 184, 0.08)',
@@ -223,8 +248,12 @@
             pointBorderColor: '#fff',
             pointHoverBackgroundColor: '#fff',
             pointHoverBorderColor: hasUserValues ? solid : 'rgba(148, 163, 184, 0.95)',
-            pointRadius: hasUserValues ? 6 : 4,
-            pointHoverRadius: 7,
+            pointRadius: function(ctx) {
+                return managePointRadius(ctx, 6, 4);
+            },
+            pointHoverRadius: function(ctx) {
+                return managePointRadius(ctx, 7, 5);
+            },
             borderWidth: 0,
             fill: false,
             tension: 0,
@@ -238,9 +267,13 @@
             datasets.push({
                 label: payload.course_average.label ||
                     ((payload.strings && payload.strings.courseAverageLegend) || 'Course average'),
-                data: avgVals.map(function(value) {
+                data: avgVals.map(function(value, idx) {
+                    if (placeholder[idx]) {
+                        return null;
+                    }
                     return value === null ? 0 : value;
                 }),
+                spanGaps: false,
                 radarArcSegments: true,
                 radarArcStrokeWidth: 1.8,
                 radarWaveAmp: 0.022,
@@ -250,8 +283,20 @@
                 borderColor: 'rgba(100, 116, 139, 0.9)',
                 pointBackgroundColor: 'rgba(100, 116, 139, 0.9)',
                 pointBorderColor: '#fff',
-                pointRadius: 4,
-                pointHoverRadius: 5,
+                pointRadius: function(ctx) {
+                    var d = ctx.dataset.data[ctx.dataIndex];
+                    if (d === null || typeof d === 'undefined' || (typeof d === 'number' && isNaN(d))) {
+                        return 0;
+                    }
+                    return 4;
+                },
+                pointHoverRadius: function(ctx) {
+                    var d = ctx.dataset.data[ctx.dataIndex];
+                    if (d === null || typeof d === 'undefined' || (typeof d === 'number' && isNaN(d))) {
+                        return 0;
+                    }
+                    return 5;
+                },
                 borderWidth: 0,
                 fill: false,
                 tension: 0
