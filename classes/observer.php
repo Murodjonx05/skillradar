@@ -10,7 +10,7 @@ defined('MOODLE_INTERNAL') || die();
  */
 class observer {
     public static function user_graded(\core\event\user_graded $event): void {
-        if (empty($event->courseid)) {
+        if (empty($event->courseid) || empty($event->relateduserid)) {
             return;
         }
         manager::invalidate_user_cache((int)$event->courseid, (int)$event->relateduserid);

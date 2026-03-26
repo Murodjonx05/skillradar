@@ -40,12 +40,7 @@ class hybrid_provider {
      * @return array
      */
     private static function build_global_gradebook_radar(int $userid, int $courseid, bool $includecourseaverage): array {
-        $definitions = manager::get_definitions($courseid);
-        $mappings = manager::get_mappings($courseid);
-        if (!empty($definitions) || !empty($mappings)) {
-            return calculator::build_payload($courseid, $userid, $includecourseaverage);
-        }
-        // Do not fall back to question-aggregated course radar — it duplicates the local (per-quiz) chart.
-        return grade_provider::get_empty_global_gradebook_radar_payload($courseid, $includecourseaverage);
+        // Same top chart as branch main /api.php (grade-item mapping radar only).
+        return calculator::build_payload($courseid, $userid, $includecourseaverage);
     }
 }

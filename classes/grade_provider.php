@@ -584,16 +584,119 @@ class grade_provider {
             'strategy' => cache_manager::STRATEGY_LATEST,
         ]);
         foreach ($recordset as $record) {
-            $byvalues[(int)$record->skillid] = skill_aggregator::compute_percent((float)$record->earned, (float)$record->maxearned);
+            $sid = (int)$record->skillid;
+            $maxsum = (float)$record->maxearned;
+            // Cohort has no question-level weight → do not treat as 0%; fill from gradebook below.
+            if ($maxsum <= 1e-6) {
+                $byvalues[$sid] = null;
+            } else {
+                $byvalues[$sid] = skill_aggregator::compute_percent((float)$record->earned, $maxsum);
+            }
         }
 
-        return [
+        $courseavg = [
             'label' => get_string('courseaveragelegend', 'local_skillradar'),
             'values' => array_map(static function(array $row) use ($byvalues) {
                 $skillid = (int)$row['key'];
                 return $byvalues[$skillid] ?? null;
             }, $detail),
         ];
+
+        return self::apply_gradebook_course_average_fallback($courseid, $detail, $courseavg);
+    }
+
+    /**
+     * Mean journal % for a grade item (users with a grade row), for cohort series when materialized sums lack weight.
+     *
+     * @param int $courseid
+     * @param int $gradeitemid
+     * @return float|null
+     */
+    private static function average_percent_for_grade_item(int $courseid, int $gradeitemid): ?float {
+        global $DB;
+
+        $userids = $DB->get_fieldset_sql(
+            "SELECT DISTINCT userid
+               FROM {grade_grades}
+              WHERE itemid = ?",
+            [$gradeitemid]
+        );
+        if (!$userids) {
+            return null;
+        }
+        $samples = [];
+        foreach ($userids as $uid) {
+            $p = calculator::percent_for_grade_item($courseid, $gradeitemid, (int)$uid);
+            if ($p !== null) {
+                $samples[] = $p;
+            }
+        }
+        if ($samples === []) {
+            return null;
+        }
+
+        return round(array_sum($samples) / count($samples), 2);
+    }
+
+    /**
+     * When cohort materialized data has no earned/max weight for a skill, course average cannot be derived from
+     * local_skill_user_result; use mean % on the mapped grade item (aligned with the user journal fallback).
+     *
+     * @param int $courseid
+     * @param array $detail
+     * @param array $courseavg
+     * @return array
+     */
+    private static function apply_gradebook_course_average_fallback(int $courseid, array $detail, array $courseavg): array {
+        $mappings = manager::get_mappings($courseid);
+        if (!$mappings) {
+            return $courseavg;
+        }
+
+        $gradeitembykey = [];
+        foreach ($mappings as $m) {
+            $k = trim((string)$m->skill_key);
+            if ($k !== '' && !isset($gradeitembykey[$k])) {
+                $gradeitembykey[$k] = (int)$m->gradeitemid;
+            }
+        }
+        if ($gradeitembykey === []) {
+            return $courseavg;
+        }
+
+        $defbyid = [];
+        foreach (manager::get_definitions($courseid) as $d) {
+            $defbyid[(int)$d->id] = $d;
+        }
+
+        $values = $courseavg['values'];
+        foreach ($detail as $i => $row) {
+            if (!empty($row['placeholder'])) {
+                continue;
+            }
+            if (($values[$i] ?? null) !== null) {
+                continue;
+            }
+            $sid = (int)$row['key'];
+            if ($sid <= 0) {
+                continue;
+            }
+            $def = $defbyid[$sid] ?? null;
+            if (!$def) {
+                continue;
+            }
+            $sk = trim((string)$def->skill_key);
+            if ($sk === '' || empty($gradeitembykey[$sk])) {
+                continue;
+            }
+            $avg = self::average_percent_for_grade_item($courseid, $gradeitembykey[$sk]);
+            if ($avg !== null) {
+                $values[$i] = $avg;
+            }
+        }
+        $courseavg['values'] = $values;
+
+        return $courseavg;
     }
 
     /**

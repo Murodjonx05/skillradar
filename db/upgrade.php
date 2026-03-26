@@ -210,5 +210,25 @@ function xmldb_local_skillradar_upgrade($oldversion) {
         upgrade_plugin_savepoint(true, 2026033144, 'local', 'skillradar');
     }
 
+    if ($oldversion < 2026033145) {
+        \cache::make('local_skillradar', 'skillpayload')->purge();
+        upgrade_plugin_savepoint(true, 2026033145, 'local', 'skillradar');
+    }
+
+    if ($oldversion < 2026033146) {
+        \cache::make('local_skillradar', 'skillpayload')->purge();
+        upgrade_plugin_savepoint(true, 2026033146, 'local', 'skillradar');
+    }
+
+    if ($oldversion < 2026033147) {
+        \cache::make('local_skillradar', 'skillpayload')->purge();
+        upgrade_plugin_savepoint(true, 2026033147, 'local', 'skillradar');
+    }
+
+    if ($oldversion < 2026033148) {
+        \cache::make('local_skillradar', 'skillpayload')->purge();
+        upgrade_plugin_savepoint(true, 2026033148, 'local', 'skillradar');
+    }
+
     return true;
 }

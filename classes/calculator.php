@@ -143,26 +143,45 @@ class calculator {
     }
 
     public static function build_skill_rows(int $courseid, int $userid, array $definitions, array $mappings): array {
-        $rows = [];
+        $defbykey = [];
         foreach ($definitions as $definition) {
-            $rows[$definition->skill_key] = [
-                'key' => $definition->skill_key,
-                'label' => $definition->displayname,
-                'color' => $definition->color,
-                'value' => null,
-                'items' => 0,
-                'empty' => true,
-                'placeholder' => false,
-                'weighted' => 0.0,
-                'weightsum' => 0.0,
-            ];
+            $defbykey[$definition->skill_key] = $definition;
         }
 
+        // First chart: only axes for skills that are actually mapped to a grade item (manage UI), not every course definition.
+        $orderedkeys = [];
+        $seen = [];
         foreach ($mappings as $mapping) {
-            if (!isset($rows[$mapping->skill_key])) {
-                $rows[$mapping->skill_key] = [
-                    'key' => $mapping->skill_key,
-                    'label' => $mapping->skill_key,
+            $sk = trim((string) $mapping->skill_key);
+            if ($sk === '' || $sk === '_none') {
+                continue;
+            }
+            if (isset($seen[$sk])) {
+                continue;
+            }
+            $seen[$sk] = true;
+            $orderedkeys[] = $sk;
+        }
+
+        $rows = [];
+        foreach ($orderedkeys as $skillkey) {
+            if (isset($defbykey[$skillkey])) {
+                $d = $defbykey[$skillkey];
+                $rows[$skillkey] = [
+                    'key' => $skillkey,
+                    'label' => $d->displayname,
+                    'color' => $d->color,
+                    'value' => null,
+                    'items' => 0,
+                    'empty' => true,
+                    'placeholder' => false,
+                    'weighted' => 0.0,
+                    'weightsum' => 0.0,
+                ];
+            } else {
+                $rows[$skillkey] = [
+                    'key' => $skillkey,
+                    'label' => $skillkey,
                     'color' => '#64748B',
                     'value' => null,
                     'items' => 0,
@@ -172,8 +191,15 @@ class calculator {
                     'weightsum' => 0.0,
                 ];
             }
+        }
 
-            $rows[$mapping->skill_key]['items']++;
+        foreach ($mappings as $mapping) {
+            $sk = trim((string) $mapping->skill_key);
+            if ($sk === '' || $sk === '_none' || !isset($rows[$sk])) {
+                continue;
+            }
+
+            $rows[$sk]['items']++;
             $gradeitem = grade_item::fetch(['id' => $mapping->gradeitemid, 'courseid' => $courseid]);
             if (!$gradeitem) {
                 continue;
@@ -193,8 +219,8 @@ class calculator {
             if ($normalized === null) {
                 continue;
             }
-            $rows[$mapping->skill_key]['weighted'] += $normalized * $weight;
-            $rows[$mapping->skill_key]['weightsum'] += $weight;
+            $rows[$sk]['weighted'] += $normalized * $weight;
+            $rows[$sk]['weightsum'] += $weight;
         }
 
         foreach ($rows as &$row) {
@@ -286,24 +312,34 @@ class calculator {
 
     public static function build_mapping_meta(int $courseid, array $definitions, array $mappings): array {
         global $DB;
-        $meta = [];
+        $defbykey = [];
         foreach ($definitions as $definition) {
-            $meta[$definition->skill_key] = [
-                'key' => $definition->skill_key,
-                'label' => $definition->displayname,
-                'color' => $definition->color,
-                'items' => [],
-            ];
+            $defbykey[$definition->skill_key] = $definition;
         }
 
+        $meta = [];
         foreach ($mappings as $mapping) {
-            if (!isset($meta[$mapping->skill_key])) {
-                $meta[$mapping->skill_key] = [
-                    'key' => $mapping->skill_key,
-                    'label' => $mapping->skill_key,
-                    'color' => '#64748B',
-                    'items' => [],
-                ];
+            $sk = trim((string) $mapping->skill_key);
+            if ($sk === '' || $sk === '_none') {
+                continue;
+            }
+            if (!isset($meta[$sk])) {
+                if (isset($defbykey[$sk])) {
+                    $d = $defbykey[$sk];
+                    $meta[$sk] = [
+                        'key' => $sk,
+                        'label' => $d->displayname,
+                        'color' => $d->color,
+                        'items' => [],
+                    ];
+                } else {
+                    $meta[$sk] = [
+                        'key' => $sk,
+                        'label' => $sk,
+                        'color' => '#64748B',
+                        'items' => [],
+                    ];
+                }
             }
             $gi = grade_item::fetch(['id' => $mapping->gradeitemid, 'courseid' => $courseid]);
             if (!$gi) {
@@ -340,7 +376,7 @@ class calculator {
             if ($grange <= 0.0) {
                 $gmax = $gmin + 1.0;
             }
-            $meta[$mapping->skill_key]['items'][] = [
+            $meta[$sk]['items'][] = [
                 'gradeitemid' => (int)$mapping->gradeitemid,
                 'weight' => (float)$mapping->weight,
                 'grademin' => $gmin,
