@@ -69,7 +69,8 @@ class attempt_analyzer {
             $slotmaxmark = (float)$slotweights[$slot];
 
             $state = (string)$step->state;
-            if (!self::is_question_step_eligible($state, $step->fraction)) {
+            $pendinggrade = self::is_pending_manual_grade($state);
+            if (!self::is_question_step_eligible($state, $step->fraction) && !$pendinggrade) {
                 continue;
             }
 
@@ -78,8 +79,14 @@ class attempt_analyzer {
                 continue;
             }
 
-            $fraction = (float)$step->fraction;
-            $earned = $fraction * $slotmaxmark;
+            if ($pendinggrade) {
+                // Finished attempt but question not graded yet (e.g. essay): still weight the slot in skill %.
+                $fraction = 0.0;
+                $earned = 0.0;
+            } else {
+                $fraction = (float)$step->fraction;
+                $earned = $fraction * $slotmaxmark;
+            }
 
             $rows[] = [
                 'attemptid' => (int)$attempt->id,
@@ -128,5 +135,12 @@ class attempt_analyzer {
 
         $summary = $questionstate->get_summary_state();
         return $summary === 'autograded' || $summary === 'manuallygraded';
+    }
+
+    /**
+     * Essay / file responses etc.: submitted in a finished attempt but teacher has not graded yet.
+     */
+    private static function is_pending_manual_grade(string $state): bool {
+        return $state === 'needsgrading';
     }
 }

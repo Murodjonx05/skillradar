@@ -8,6 +8,8 @@ defined('MOODLE_INTERNAL') || die();
 /**
  * Two radars: (1) global — Moodle gradebook via grade-item→skill mapping;
  * (2) local — question-tag skills aggregated across all course quizzes (latest attempt per quiz per skill).
+ *
+ * `question_skills_radar` is kept as a backward-compatible alias of the local question-based radar.
  */
 class hybrid_provider {
     /**
@@ -24,7 +26,7 @@ class hybrid_provider {
 
         return [
             'course_skills_radar' => $courseskills,
-            'question_skills_radar' => $courseskills,
+            'question_skills_radar' => $localskills,
             'local_skills_radar' => $localskills,
         ];
     }

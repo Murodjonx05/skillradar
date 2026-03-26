@@ -126,6 +126,33 @@
         return fallback || '#3B82F6';
     }
 
+    /**
+     * API course_average.values align to skills_detail only; chart.labels can be longer (min-axes placeholders).
+     * Chart.js requires every dataset data[] length to match labels[].
+     *
+     * @param {{chart?: object, course_average?: object}} payload
+     * @returns {Array<number|null>}
+     */
+    function alignCourseAverageValuesToChart(payload) {
+        var chart = payload.chart || {};
+        var labels = chart.labels || [];
+        var placeholder = chart.placeholder || [];
+        var avgVals = (payload.course_average && payload.course_average.values) ? payload.course_average.values : [];
+        var data = [];
+        var vidx = 0;
+        var i;
+        for (i = 0; i < labels.length; i++) {
+            if (placeholder[i]) {
+                data.push(null);
+            } else {
+                var raw = vidx < avgVals.length ? avgVals[vidx] : null;
+                vidx++;
+                data.push(raw === null || typeof raw === 'undefined' ? 0 : raw);
+            }
+        }
+        return data;
+    }
+
     global.localSkillRadarCommon = {
         RADAR_R_MIN: RADAR_R_MIN,
         RADAR_R_MAX: RADAR_R_MAX,
@@ -136,6 +163,7 @@
         hexToRgb: hexToRgb,
         hexToRgba: hexToRgba,
         applyPrimaryColor: applyPrimaryColor,
-        resolvePrimaryColor: resolvePrimaryColor
+        resolvePrimaryColor: resolvePrimaryColor,
+        alignCourseAverageValuesToChart: alignCourseAverageValuesToChart
     };
 })(typeof window !== 'undefined' ? window : this);

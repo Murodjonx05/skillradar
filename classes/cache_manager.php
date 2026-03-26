@@ -7,10 +7,14 @@ defined('MOODLE_INTERNAL') || die();
 
 /**
  * Writes deterministic analytics rows.
+ *
+ * Per-quiz user rows follow the quiz activity «Grading method» (highest / average / first / last attempt),
+ * matching {@see \mod_quiz\grade_calculator} behaviour for which attempts contribute.
  */
 class cache_manager {
     public const TABLE_ATTEMPT = 'local_skill_attempt_result';
     public const TABLE_USER = 'local_skill_user_result';
+    /** @var string Stored in aggregation_strategy; selection uses quiz.grademethod. */
     public const STRATEGY_LATEST = 'latest_finalized_per_quiz';
 
     /**
@@ -69,14 +73,16 @@ class cache_manager {
     }
 
     /**
-     * Rebuild the materialized latest-attempt-per-quiz facts for one user and quiz.
+     * Rebuild materialized per-quiz skill rows for one user using the quiz «Grading method» setting.
      *
      * @param int $userid
      * @param int $quizid
      * @return void
      */
     public static function update_user_skills(int $userid, int $quizid): void {
-        global $DB;
+        global $CFG, $DB;
+
+        require_once($CFG->dirroot . '/mod/quiz/lib.php');
 
         $DB->delete_records(self::TABLE_USER, [
             'userid' => $userid,
@@ -84,41 +90,130 @@ class cache_manager {
             'aggregation_strategy' => self::STRATEGY_LATEST,
         ]);
 
-        $sql = "SELECT qa.id,
-                       qa.quiz AS quizid,
-                       qa.userid,
-                       q.course AS courseid
-                  FROM {quiz_attempts} qa
-                  JOIN {quiz} q ON q.id = qa.quiz
-                 WHERE qa.quiz = :quizid
-                   AND qa.userid = :userid
-                   AND qa.preview = 0
-                   AND qa.state = :state
-              ORDER BY qa.timefinish DESC, qa.timemodified DESC, qa.id DESC";
-        $latest = $DB->get_record_sql($sql, [
-            'quizid' => $quizid,
-            'userid' => $userid,
-            'state' => \mod_quiz\quiz_attempt::FINISHED,
-        ], IGNORE_MULTIPLE);
+        $quiz = $DB->get_record('quiz', ['id' => $quizid], 'id, course, grademethod', MUST_EXIST);
+        $courseid = (int)$quiz->course;
 
-        if (!$latest) {
+        $attemptids = self::resolve_attempt_ids_for_quiz_grademethod($quiz, $userid);
+        if ($attemptids === []) {
             return;
         }
 
-        $attemptrows = $DB->get_records(self::TABLE_ATTEMPT, ['attemptid' => $latest->id], 'skillid ASC');
-        if (!$attemptrows) {
+        if (count($attemptids) === 1) {
+            self::insert_user_skills_from_single_attempt($courseid, $userid, $quizid, (int)$attemptids[0]);
+            return;
+        }
+
+        self::insert_user_skills_from_averaged_attempts($courseid, $userid, $quizid, $attemptids);
+    }
+
+    /**
+     * Which finished attempts contribute for this user, following quiz.grademethod (mod_quiz constants).
+     *
+     * @param \stdClass $quiz quiz row with grademethod
+     * @param int $userid
+     * @return int[] attempt ids (one id, or all ids for QUIZ_GRADEAVERAGE)
+     */
+    public static function resolve_attempt_ids_for_quiz_grademethod(\stdClass $quiz, int $userid): array {
+        global $DB;
+
+        $attempts = $DB->get_records_sql(
+            "SELECT id, sumgrades, attempt
+               FROM {quiz_attempts}
+              WHERE quiz = :quizid
+                AND userid = :userid
+                AND preview = 0
+                AND state = :state
+           ORDER BY attempt ASC, id ASC",
+            [
+                'quizid' => (int)$quiz->id,
+                'userid' => $userid,
+                'state' => \mod_quiz\quiz_attempt::FINISHED,
+            ]
+        );
+
+        if ($attempts === []) {
+            return [];
+        }
+
+        $list = array_values($attempts);
+        $gm = (string)($quiz->grademethod ?? QUIZ_ATTEMPTLAST);
+
+        switch ($gm) {
+            case (string)QUIZ_ATTEMPTFIRST:
+                return [(int)$list[0]->id];
+            case (string)QUIZ_ATTEMPTLAST:
+                return [(int)$list[count($list) - 1]->id];
+            case (string)QUIZ_GRADEHIGHEST:
+                return self::pick_highest_sumgrades_attempt_ids($list);
+            case (string)QUIZ_GRADEAVERAGE:
+                return array_map(static function(\stdClass $a): int {
+                    return (int)$a->id;
+                }, $list);
+            default:
+                return [(int)$list[count($list) - 1]->id];
+        }
+    }
+
+    /**
+     * @param array<int, \stdClass> $list ordered by attempt ASC
+     * @return int[]
+     */
+    private static function pick_highest_sumgrades_attempt_ids(array $list): array {
+        $best = null;
+        foreach ($list as $a) {
+            if ($a->sumgrades === null) {
+                continue;
+            }
+            $sg = (float)$a->sumgrades;
+            if ($best === null || $sg > (float)$best->sumgrades) {
+                $best = $a;
+            }
+        }
+        if ($best === null) {
+            return [];
+        }
+        $maxsg = (float)$best->sumgrades;
+        $tie = [];
+        foreach ($list as $a) {
+            if ($a->sumgrades === null) {
+                continue;
+            }
+            if (abs((float)$a->sumgrades - $maxsg) < 1e-9) {
+                $tie[] = (int)$a->id;
+            }
+        }
+        if ($tie === []) {
+            return [];
+        }
+        sort($tie);
+
+        return [(int)end($tie)];
+    }
+
+    /**
+     * @param int $courseid
+     * @param int $userid
+     * @param int $quizid
+     * @param int $attemptid
+     * @return void
+     */
+    private static function insert_user_skills_from_single_attempt(int $courseid, int $userid, int $quizid, int $attemptid): void {
+        global $DB;
+
+        $attemptrows = $DB->get_records(self::TABLE_ATTEMPT, ['attemptid' => $attemptid], 'skillid ASC');
+        if ($attemptrows === []) {
             return;
         }
 
         $now = time();
         foreach ($attemptrows as $row) {
             $record = (object)[
-                'courseid' => (int)$latest->courseid,
-                'quizid' => (int)$quizid,
-                'userid' => (int)$userid,
+                'courseid' => $courseid,
+                'quizid' => $quizid,
+                'userid' => $userid,
                 'skillid' => (int)$row->skillid,
                 'skillname' => (string)$row->skillname,
-                'source_attemptid' => (int)$latest->id,
+                'source_attemptid' => $attemptid,
                 'aggregation_strategy' => self::STRATEGY_LATEST,
                 'earned' => (float)$row->earned,
                 'maxearned' => (float)$row->maxearned,
@@ -127,6 +222,82 @@ class cache_manager {
                 'attempts_count' => 1,
                 'calculation_version' => (int)$row->calculation_version,
                 'debugmeta' => $row->debugmeta,
+                'timemodified' => $now,
+            ];
+            $DB->insert_record(self::TABLE_USER, $record);
+        }
+    }
+
+    /**
+     * Mean of per-attempt skill % across finished attempts (analogous to mean of sumgrades for the quiz grade).
+     *
+     * @param int $courseid
+     * @param int $userid
+     * @param int $quizid
+     * @param int[] $attemptids
+     * @return void
+     */
+    private static function insert_user_skills_from_averaged_attempts(int $courseid, int $userid, int $quizid, array $attemptids): void {
+        global $DB;
+
+        list($insql, $params) = $DB->get_in_or_equal($attemptids, SQL_PARAMS_NAMED, 'att');
+        $sql = "SELECT DISTINCT sar.skillid
+                  FROM {" . self::TABLE_ATTEMPT . "} sar
+                 WHERE sar.attemptid $insql";
+        $skillids = $DB->get_fieldset_sql($sql, $params);
+        if ($skillids === []) {
+            return;
+        }
+
+        $now = time();
+        $attemptcount = count($attemptids);
+        $meta = json_encode([
+            'quiz_grademethod' => 'average',
+            'attempt_ids' => array_values($attemptids),
+        ], JSON_UNESCAPED_UNICODE);
+
+        foreach ($skillids as $skillid) {
+            $skillid = (int)$skillid;
+            $percents = [];
+            $questionsmax = 0;
+            $calcver = 1;
+            $name = '';
+
+            foreach ($attemptids as $aid) {
+                $row = $DB->get_record(self::TABLE_ATTEMPT, ['attemptid' => $aid, 'skillid' => $skillid]);
+                if (!$row) {
+                    continue;
+                }
+                $name = (string)$row->skillname;
+                $calcver = (int)$row->calculation_version;
+                $questionsmax = max($questionsmax, (int)$row->questions_count);
+                if ((float)$row->maxearned > 0) {
+                    $percents[] = skill_aggregator::compute_percent((float)$row->earned, (float)$row->maxearned);
+                }
+            }
+
+            if ($percents === []) {
+                continue;
+            }
+
+            $avgpercent = round(array_sum($percents) / count($percents), 2);
+            $scale = 100.0;
+
+            $record = (object)[
+                'courseid' => $courseid,
+                'quizid' => $quizid,
+                'userid' => $userid,
+                'skillid' => $skillid,
+                'skillname' => $name !== '' ? $name : 'skill',
+                'source_attemptid' => 0,
+                'aggregation_strategy' => self::STRATEGY_LATEST,
+                'earned' => round($avgpercent, 5),
+                'maxearned' => $scale,
+                'percent' => $avgpercent,
+                'questions_count' => $questionsmax,
+                'attempts_count' => $attemptcount,
+                'calculation_version' => $calcver,
+                'debugmeta' => $meta,
                 'timemodified' => $now,
             ];
             $DB->insert_record(self::TABLE_USER, $record);

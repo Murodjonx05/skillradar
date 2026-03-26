@@ -303,16 +303,10 @@
             return null;
         }
 
-        var placeholder = payload.chart && payload.chart.placeholder ? payload.chart.placeholder : [];
         return {
             label: payload.course_average.label ||
                 ((payload.strings && payload.strings.courseAverageLegend) || 'Course average'),
-            data: payload.course_average.values.map(function(value, idx) {
-                if (placeholder[idx]) {
-                    return null;
-                }
-                return value === null ? 0 : value;
-            }),
+            data: C.alignCourseAverageValuesToChart(payload),
             spanGaps: false,
             radarArcSegments: true,
             radarArcStrokeWidth: 1.8,

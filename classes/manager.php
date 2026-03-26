@@ -339,6 +339,45 @@ class manager {
     }
 
     /**
+     * Counts how many non-random quiz questions in the course resolve to each course skill definition (positive skillid only).
+     * Used to show axes for tagged skills that have no materialized learner row yet.
+     *
+     * @param int $courseid
+     * @return array<int, int> definition id => question count
+     */
+    public static function get_tagged_skill_question_counts_in_course(int $courseid): array {
+        static $cache = [];
+        if (isset($cache[$courseid])) {
+            return $cache[$courseid];
+        }
+        $questions = self::get_course_quiz_questions($courseid);
+        if ($questions === []) {
+            $cache[$courseid] = [];
+            return [];
+        }
+        $counts = [];
+        foreach ($questions as $q) {
+            try {
+                $skill = skill_service::get_question_skill((int)$q->questionid, $courseid);
+            } catch (\Throwable $e) {
+                debugging('local_skillradar get_tagged_skill_question_counts q=' . (int)($q->questionid ?? 0) . ': ' .
+                    $e->getMessage(), DEBUG_DEVELOPER);
+                continue;
+            }
+            if (!$skill || (int)$skill->skillid <= 0) {
+                continue;
+            }
+            $sid = (int)$skill->skillid;
+            if (!isset($counts[$sid])) {
+                $counts[$sid] = 0;
+            }
+            $counts[$sid]++;
+        }
+        $cache[$courseid] = $counts;
+        return $counts;
+    }
+
+    /**
      * Fallback when quiz_slots still had questionid (very old DBs).
      *
      * @param int $courseid

@@ -263,16 +263,10 @@
         }];
 
         if (payload.course_average && payload.course_average.values) {
-            var avgVals = payload.course_average.values;
             datasets.push({
                 label: payload.course_average.label ||
                     ((payload.strings && payload.strings.courseAverageLegend) || 'Course average'),
-                data: avgVals.map(function(value, idx) {
-                    if (placeholder[idx]) {
-                        return null;
-                    }
-                    return value === null ? 0 : value;
-                }),
+                data: C.alignCourseAverageValuesToChart(payload),
                 spanGaps: false,
                 radarArcSegments: true,
                 radarArcStrokeWidth: 1.8,

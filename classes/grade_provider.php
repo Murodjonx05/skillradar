@@ -6,15 +6,15 @@ namespace local_skillradar;
 defined('MOODLE_INTERNAL') || die();
 
 /**
- * Builds UI payloads from materialized tables only.
+ * Builds UI payloads from materialized tables; local radar may fill gaps from gradebook mappings.
  */
 class grade_provider {
     private const MIN_AXES = 3;
 
     /**
-     * Build radar payload from materialized tables only (no quiz/grade-item joins).
+     * Build radar payload from materialized rows; may fill zero-weight skills from gradebook mappings.
      *
-     * One row per skill aggregates earned/max across all quizzes (latest finalized attempt per quiz is pre-materialized).
+     * One row per skill aggregates earned/max across all quizzes (per quiz grademethod in materialized rows).
      *
      * @param int $userid
      * @param int $courseid
@@ -233,7 +233,120 @@ class grade_provider {
             ];
         }
 
-        return self::finalize_tagged_skill_rows($courseid, $rows);
+        $rows = self::merge_missing_tagged_skills_used_in_quizzes($courseid, $rows);
+
+        $rows = self::finalize_tagged_skill_rows($courseid, $rows);
+        $rows = self::apply_gradebook_fallback_for_zero_weight_skills($courseid, $userid, $rows);
+
+        return $rows;
+    }
+
+    /**
+     * If question analytics carried no weight (maxearned≈0) but «Grade item mapping» links this definition to a grade item,
+     * use the same journal % as the global radar so local axes align with gradebook when slot data is missing.
+     *
+     * @param int $courseid
+     * @param int $userid
+     * @param array $rows
+     * @return array
+     */
+    private static function apply_gradebook_fallback_for_zero_weight_skills(int $courseid, int $userid, array $rows): array {
+        $mappings = manager::get_mappings($courseid);
+        if (!$mappings) {
+            return $rows;
+        }
+
+        $gradeitembykey = [];
+        foreach ($mappings as $m) {
+            $k = trim((string)$m->skill_key);
+            if ($k !== '' && !isset($gradeitembykey[$k])) {
+                $gradeitembykey[$k] = (int)$m->gradeitemid;
+            }
+        }
+        if ($gradeitembykey === []) {
+            return $rows;
+        }
+
+        $defbyid = [];
+        foreach (manager::get_definitions($courseid) as $d) {
+            $defbyid[(int)$d->id] = $d;
+        }
+
+        foreach ($rows as $i => $row) {
+            if (!empty($row['placeholder'])) {
+                continue;
+            }
+            $sid = (int)$row['key'];
+            if ($sid <= 0) {
+                continue;
+            }
+            $max = (float)($row['maxearned'] ?? 0);
+            if ($max > 1e-6) {
+                continue;
+            }
+            $def = $defbyid[$sid] ?? null;
+            if (!$def) {
+                continue;
+            }
+            $sk = trim((string)$def->skill_key);
+            if ($sk === '' || empty($gradeitembykey[$sk])) {
+                continue;
+            }
+            $pct = calculator::percent_for_grade_item($courseid, $gradeitembykey[$sk], $userid);
+            if ($pct === null) {
+                continue;
+            }
+            $rows[$i]['value'] = round((float)$pct, 2);
+            $rows[$i]['earned'] = round((float)$pct, 5);
+            $rows[$i]['maxearned'] = 100.0;
+            $rows[$i]['empty'] = false;
+            if ((int)($rows[$i]['items'] ?? 0) < 1) {
+                $rows[$i]['items'] = 1;
+            }
+        }
+
+        return $rows;
+    }
+
+    /**
+     * Add skill axes for definitions tagged on course quiz questions when materialized rows are missing (0% until attempted).
+     *
+     * @param int $courseid
+     * @param array $rows
+     * @return array
+     */
+    private static function merge_missing_tagged_skills_used_in_quizzes(int $courseid, array $rows): array {
+        try {
+            $usage = manager::get_tagged_skill_question_counts_in_course($courseid);
+        } catch (\Throwable $e) {
+            debugging('local_skillradar merge_missing_tagged_skills: ' . $e->getMessage(), DEBUG_DEVELOPER);
+            return $rows;
+        }
+        if ($usage === []) {
+            return $rows;
+        }
+        $have = [];
+        foreach ($rows as $row) {
+            $have[(int)$row['key']] = true;
+        }
+        foreach ($usage as $skillid => $qcount) {
+            if (isset($have[$skillid])) {
+                continue;
+            }
+            $rows[] = [
+                'key' => (string)$skillid,
+                'label' => '',
+                'color' => self::color_for_skill_row($courseid, $skillid),
+                'value' => 0.0,
+                'items' => (int)$qcount,
+                'empty' => true,
+                'placeholder' => false,
+                'earned' => 0.0,
+                'maxearned' => 0.0,
+            ];
+        }
+
+        return $rows;
     }
 
     /**
