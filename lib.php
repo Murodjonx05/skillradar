@@ -341,7 +341,16 @@ function local_skillradar_render_grade_report_panel(): string {
         'local-skillradar-section local-skillradar-section--course'
     );
     $chartwraplocal = html_writer::div(
-        html_writer::tag('canvas', '', ['id' => 'local-skillradar-canvas-local']),
+        html_writer::tag('canvas', '', ['id' => 'local-skillradar-canvas-local']) .
+        html_writer::div(
+            html_writer::div(
+                html_writer::div('0%', 'local-skillradar-score-value', ['id' => 'local-skillradar-score-value-local']) .
+                html_writer::div('AVERAGE', 'local-skillradar-score-label', ['id' => 'local-skillradar-score-label-local']),
+                'local-skillradar-center-score',
+                ['id' => 'local-skillradar-center-score-local', 'title' => 'Toggle score mode']
+            ),
+            'local-skillradar-center-anchor'
+        ),
         'local-skillradar-chartwrap local-skillradar-chartwrap--local'
     );
     $sectionlocal = html_writer::div(

@@ -533,19 +533,36 @@
         var centerButton = document.getElementById('local-skillradar-center-score');
         var centerValue = document.getElementById('local-skillradar-score-value');
         var centerLabel = document.getElementById('local-skillradar-score-label');
+        var centerButtonLocal = document.getElementById('local-skillradar-center-score-local');
+        var centerValueLocal = document.getElementById('local-skillradar-score-value-local');
+        var centerLabelLocal = document.getElementById('local-skillradar-score-label-local');
         var resultsLocal = document.getElementById('local-skillradar-results-local');
         var localOverallEl = document.getElementById('local-skillradar-local-overall');
         var quizNameEl = document.getElementById('local-skillradar-quiz-name');
         var lastPayload = null;
 
+        function updateAllCenterScores() {
+            if (!lastPayload) {
+                return;
+            }
+            var cp = lastPayload.course_skills_radar;
+            var lp = lastPayload.local_skills_radar;
+            updateCenterScore(cp || {}, centerValue, centerLabel, centerButton);
+            updateCenterScore(lp || {}, centerValueLocal, centerLabelLocal, centerButtonLocal);
+        }
+
         if (centerButton && !centerButton.getAttribute('data-bound')) {
             centerButton.setAttribute('data-bound', '1');
             centerButton.addEventListener('click', function() {
                 showPercentage = !showPercentage;
-                if (lastPayload) {
-                    var cp = lastPayload.course_skills_radar || lastPayload;
-                    updateCenterScore(cp, centerValue, centerLabel, centerButton);
-                }
+                updateAllCenterScores();
+            });
+        }
+        if (centerButtonLocal && !centerButtonLocal.getAttribute('data-bound')) {
+            centerButtonLocal.setAttribute('data-bound', '1');
+            centerButtonLocal.addEventListener('click', function() {
+                showPercentage = !showPercentage;
+                updateAllCenterScores();
             });
         }
 
@@ -566,6 +583,15 @@
             }
             if (centerButton) {
                 centerButton.classList.remove('rank-mode');
+            }
+            if (centerValueLocal) {
+                centerValueLocal.textContent = '—';
+            }
+            if (centerLabelLocal) {
+                centerLabelLocal.textContent = 'AVERAGE';
+            }
+            if (centerButtonLocal) {
+                centerButtonLocal.classList.remove('rank-mode');
             }
             if (courseOverallEl) {
                 courseOverallEl.textContent = '';
@@ -619,23 +645,38 @@
             }
         }
 
+        function applyLocalQuizScopeLabel(scopeEl, localPayload, strings) {
+            if (!scopeEl) {
+                return;
+            }
+            var scopeAll = strings.radarLocalScopeAll || 'All quizzes in this course';
+            if (localPayload && localPayload.local_skills_all_quizzes) {
+                scopeEl.textContent = scopeAll;
+            } else if (localPayload && localPayload.local_quiz_name) {
+                scopeEl.textContent = (strings.radarLocalQuizPrefix || 'Quiz:') + ' ' + localPayload.local_quiz_name;
+            } else {
+                scopeEl.textContent = scopeAll;
+            }
+        }
+
         function renderLocalView(localPayload, strings) {
             var localLabel = strings.radarLocalSkillsDataset ||
                 strings.radarQuestionSkillsDataset || 'Skill level (%)';
-            if (quizNameEl) {
-                var scopeAll = strings.radarLocalScopeAll || 'All quizzes in this course';
-                if (localPayload && localPayload.local_skills_all_quizzes) {
-                    quizNameEl.textContent = scopeAll;
-                } else if (localPayload && localPayload.local_quiz_name) {
-                    quizNameEl.textContent = (strings.radarLocalQuizPrefix || 'Quiz:') + ' ' + localPayload.local_quiz_name;
-                } else {
-                    quizNameEl.textContent = scopeAll;
-                }
-            }
+            applyLocalQuizScopeLabel(quizNameEl, localPayload, strings);
             if (!canvasLocal) {
                 return;
             }
-            renderChart(canvasLocal, localPayload, null, chartHolderLocal, localLabel);
+            renderChart(canvasLocal, localPayload, {
+                button: centerButtonLocal,
+                value: centerValueLocal,
+                label: centerLabelLocal
+            }, chartHolderLocal, localLabel);
+            if ((!localPayload || !localPayload.chart) && centerValueLocal) {
+                centerValueLocal.textContent = '—';
+                if (centerLabelLocal) {
+                    centerLabelLocal.textContent = 'AVERAGE';
+                }
+            }
             renderResults(resultsLocal, localPayload);
             if (localOverallEl) {
                 var lp = localPayload && localPayload.overall && localPayload.overall.percent;
