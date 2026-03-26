@@ -8,12 +8,16 @@ defined('MOODLE_INTERNAL') || die();
 use cache;
 use stdClass;
 
+/**
+ * Plugin settings, grade-item mappings, and cache coordination.
+ */
 class manager {
     public const TABLE_MAP = 'local_skillradar_map';
     public const TABLE_DEF = 'local_skillradar_def';
     public const TABLE_CFG = 'local_skillradar_cfg';
+    public const TABLE_QMAP = 'local_skillradar_qmap';
 
-    /** @var string Application cache key prefix for per-course payload revision (invalidates course without purging all sites). */
+    /** @var string Application cache key prefix for per-course payload revision. */
     private const CACHE_REV_PREFIX = 'skillradar_rev_';
 
     public static function get_course_config(int $courseid): stdClass {
@@ -38,23 +42,37 @@ class manager {
             $data->id = $existing->id;
             $data->timemodified = $now;
             $DB->update_record(self::TABLE_CFG, $data);
-            return;
+        } else {
+            $data->timecreated = $now;
+            $data->timemodified = $now;
+            $DB->insert_record(self::TABLE_CFG, $data);
         }
-        $data->timecreated = $now;
-        $data->timemodified = $now;
-        $DB->insert_record(self::TABLE_CFG, $data);
+        self::invalidate_course_cache((int)$data->courseid);
     }
 
+    /**
+     * @param int $courseid
+     * @return array
+     */
     public static function get_definitions(int $courseid): array {
         global $DB;
         return $DB->get_records(self::TABLE_DEF, ['courseid' => $courseid], 'sortorder ASC, id ASC');
     }
 
+    /**
+     * @param int $courseid
+     * @return array
+     */
     public static function get_mappings(int $courseid): array {
         global $DB;
         return $DB->get_records(self::TABLE_MAP, ['courseid' => $courseid], 'id ASC');
     }
 
+    /**
+     * @param int $courseid
+     * @param array $rows
+     * @return void
+     */
     public static function replace_mappings(int $courseid, array $rows): void {
         global $DB;
         $DB->delete_records(self::TABLE_MAP, ['courseid' => $courseid]);
@@ -67,6 +85,10 @@ class manager {
         }
     }
 
+    /**
+     * @param int $courseid
+     * @return void
+     */
     public static function purge_stale_mappings(int $courseid): void {
         global $DB;
         $sql = "SELECT m.id
@@ -80,6 +102,10 @@ class manager {
         }
     }
 
+    /**
+     * @param int $courseid
+     * @return array
+     */
     public static function count_items_per_skill(int $courseid): array {
         global $DB;
         $sql = "SELECT skill_key, COUNT(*) AS itemcount
@@ -91,13 +117,27 @@ class manager {
 
     public static function find_preview_userid(int $courseid): int {
         global $DB, $USER;
-        $sql = "SELECT DISTINCT gg.userid
-                  FROM {grade_grades} gg
-                  JOIN {grade_items} gi ON gi.id = gg.itemid
-                 WHERE gi.courseid = :courseid
-                   AND gg.finalgrade IS NOT NULL
-              ORDER BY gg.userid ASC";
-        $userid = (int)$DB->get_field_sql($sql, ['courseid' => $courseid], IGNORE_MULTIPLE);
+        $userid = (int)$DB->get_field_sql(
+            "SELECT DISTINCT userid
+               FROM {local_skill_user_result}
+              WHERE courseid = :courseid
+           ORDER BY userid ASC",
+            ['courseid' => $courseid],
+            IGNORE_MULTIPLE
+        );
+        if ($userid > 0) {
+            return $userid;
+        }
+        $userid = (int)$DB->get_field_sql(
+            "SELECT DISTINCT gg.userid
+               FROM {grade_grades} gg
+               JOIN {grade_items} gi ON gi.id = gg.itemid
+              WHERE gi.courseid = :courseid
+                AND gg.finalgrade IS NOT NULL
+           ORDER BY gg.userid ASC",
+            ['courseid' => $courseid],
+            IGNORE_MULTIPLE
+        );
         return $userid > 0 ? $userid : (int)$USER->id;
     }
 
@@ -114,7 +154,81 @@ class manager {
     }
 
     /**
-     * Revision token so mapping/config changes for one course do not require purging the whole store.
+     * @param int $courseid
+     * @return int[]
+     */
+    public static function get_course_quiz_ids(int $courseid): array {
+        global $DB;
+        return array_map('intval', $DB->get_fieldset_sql(
+            "SELECT id FROM {quiz} WHERE course = :courseid ORDER BY id ASC",
+            ['courseid' => $courseid]
+        ));
+    }
+
+    /**
+     * Quizzes in the course for the radar quiz selector (id + formatted name).
+     *
+     * @param int $courseid
+     * @return array<int, array{id:int, name:string}>
+     */
+    public static function get_course_quiz_options(int $courseid): array {
+        global $DB;
+        $records = $DB->get_records('quiz', ['course' => $courseid], 'name ASC, id ASC', 'id, name');
+        $out = [];
+        foreach ($records as $q) {
+            $out[] = [
+                'id' => (int)$q->id,
+                'name' => format_string($q->name),
+            ];
+        }
+        return $out;
+    }
+
+    /**
+     * Default quiz for the single-quiz radar: first quiz with materialized rows for this user, else first quiz in course.
+     *
+     * @param int $courseid
+     * @param int $userid
+     * @return int
+     */
+    public static function default_quiz_id_for_skill_radar(int $courseid, int $userid): int {
+        global $DB;
+        $rec = $DB->get_record_sql(
+            "SELECT quizid
+               FROM {local_skill_user_result}
+              WHERE courseid = :courseid
+                AND userid = :userid
+                AND aggregation_strategy = :strategy
+           ORDER BY quizid ASC",
+            [
+                'courseid' => $courseid,
+                'userid' => $userid,
+                'strategy' => cache_manager::STRATEGY_LATEST,
+            ],
+            IGNORE_MULTIPLE
+        );
+        if ($rec && !empty($rec->quizid)) {
+            return (int)$rec->quizid;
+        }
+        $first = $DB->get_record('quiz', ['course' => $courseid], 'id', IGNORE_MULTIPLE);
+        return $first ? (int)$first->id : 0;
+    }
+
+    /**
+     * @param int $courseid
+     * @param int $quizid
+     * @return bool
+     */
+    public static function quiz_belongs_to_course(int $courseid, int $quizid): bool {
+        global $DB;
+        if ($quizid < 1) {
+            return false;
+        }
+        return $DB->record_exists('quiz', ['id' => $quizid, 'course' => $courseid]);
+    }
+
+    /**
+     * Revision token so course setting changes do not require purging the whole store.
      */
     protected static function course_payload_revision(int $courseid): int {
         $cache = cache::make('local_skillradar', 'skillpayload');
@@ -122,7 +236,7 @@ class manager {
         if ($rev === false) {
             return 0;
         }
-        return (int) $rev;
+        return (int)$rev;
     }
 
     public static function cache_key(int $courseid, int $userid): string {
@@ -131,14 +245,221 @@ class manager {
     }
 
     /**
-     * True when the course has at least one skill (axis) defined — then the block is shown to all viewers.
-     * With zero skills the course is treated as unset and only managers see the panel.
+     * Course has skill definitions, grade mappings, or precomputed quiz analytics.
      */
     public static function is_course_skillradar_ready(int $courseid): bool {
         global $DB;
         if ($courseid < 1) {
             return false;
         }
-        return $DB->record_exists(self::TABLE_DEF, ['courseid' => $courseid]);
+        if ($DB->record_exists(self::TABLE_DEF, ['courseid' => $courseid])) {
+            return true;
+        }
+        if ($DB->record_exists(cache_manager::TABLE_USER, ['courseid' => $courseid])) {
+            return true;
+        }
+        if ($DB->record_exists(cache_manager::TABLE_ATTEMPT, ['courseid' => $courseid])) {
+            return true;
+        }
+        return $DB->record_exists(self::TABLE_MAP, ['courseid' => $courseid]);
+    }
+
+    /**
+     * Whether the question→skill table exists (upgrade completed).
+     *
+     * @return bool
+     */
+    public static function qmap_table_exists(): bool {
+        global $DB;
+        static $cache = null;
+        if ($cache !== null) {
+            return $cache;
+        }
+        $dbman = $DB->get_manager();
+        $cache = $dbman->table_exists(new \xmldb_table(self::TABLE_QMAP));
+        return $cache;
+    }
+
+    /**
+     * Distinct questions used in any quiz on this course (for per-question skill tags).
+     *
+     * Moodle 4.4+ stores slot→question via question_references, not quiz_slots.questionid.
+     *
+     * @param int $courseid
+     * @return array<int, \stdClass> questionid => {questionid, name, qtype}
+     */
+    public static function get_course_quiz_questions(int $courseid): array {
+        global $DB;
+
+        $quizzes = $DB->get_records('quiz', ['course' => $courseid], 'id ASC');
+        if (!$quizzes) {
+            return [];
+        }
+
+        if (!class_exists(\mod_quiz\question\bank\qbank_helper::class)) {
+            return self::get_course_quiz_questions_legacy($courseid);
+        }
+
+        $questionids = [];
+        foreach ($quizzes as $quiz) {
+            $cm = get_coursemodule_from_instance('quiz', $quiz->id, $courseid, false, IGNORE_MISSING);
+            if (!$cm) {
+                continue;
+            }
+            $context = \context_module::instance($cm->id);
+            try {
+                $structure = \mod_quiz\question\bank\qbank_helper::get_question_structure((int)$quiz->id, $context, null);
+            } catch (\Throwable $e) {
+                debugging('local_skillradar get_course_quiz_questions quiz ' . (int)$quiz->id . ': ' . $e->getMessage(), DEBUG_DEVELOPER);
+                continue;
+            }
+            foreach ($structure as $slotdata) {
+                $qid = $slotdata->questionid ?? null;
+                if ($qid === null || !is_numeric($qid) || (int)$qid < 1) {
+                    continue;
+                }
+                if (($slotdata->qtype ?? '') === 'random') {
+                    continue;
+                }
+                $questionids[(int)$qid] = true;
+            }
+        }
+
+        if ($questionids === []) {
+            return [];
+        }
+
+        [$insql, $params] = $DB->get_in_or_equal(array_keys($questionids), SQL_PARAMS_NAMED);
+        $sql = "SELECT q.id AS questionid, q.name, q.qtype
+                  FROM {question} q
+                 WHERE q.id $insql
+              ORDER BY q.name ASC, q.id ASC";
+
+        return $DB->get_records_sql($sql, $params);
+    }
+
+    /**
+     * Fallback when quiz_slots still had questionid (very old DBs).
+     *
+     * @param int $courseid
+     * @return array
+     */
+    private static function get_course_quiz_questions_legacy(int $courseid): array {
+        global $DB;
+
+        $columns = $DB->get_columns('quiz_slots');
+        if (!isset($columns['questionid'])) {
+            return [];
+        }
+
+        $sql = "SELECT DISTINCT qs.questionid,
+                       q.name,
+                       q.qtype
+                  FROM {quiz_slots} qs
+                  JOIN {quiz} qz ON qz.id = qs.quizid
+                  JOIN {question} q ON q.id = qs.questionid
+                 WHERE qz.course = :courseid
+              ORDER BY q.name ASC, qs.questionid ASC";
+
+        return $DB->get_records_sql($sql, ['courseid' => $courseid]);
+    }
+
+    /**
+     * @param int $courseid
+     * @return array<int, string> questionid => skill_key
+     */
+    public static function get_question_skill_overrides(int $courseid): array {
+        global $DB;
+        if (!self::qmap_table_exists()) {
+            return [];
+        }
+        $rows = $DB->get_records(self::TABLE_QMAP, ['courseid' => $courseid]);
+        $out = [];
+        foreach ($rows as $row) {
+            $out[(int)$row->questionid] = (string)$row->skill_key;
+        }
+        return $out;
+    }
+
+    /**
+     * Replace per-question skill_key overrides. Empty skill_key removes mapping for that question.
+     *
+     * @param int $courseid
+     * @param array<int, array{questionid:int, skill_key:string}> $rows
+     * @return void
+     */
+    public static function replace_question_skill_mappings(int $courseid, array $rows): void {
+        global $DB;
+        if (!self::qmap_table_exists()) {
+            return;
+        }
+
+        $valid = [];
+        foreach (self::get_definitions($courseid) as $def) {
+            $valid[$def->skill_key] = true;
+        }
+
+        foreach ($rows as $row) {
+            $qid = (int)$row['questionid'];
+            if ($qid < 1) {
+                continue;
+            }
+            $DB->delete_records(self::TABLE_QMAP, ['courseid' => $courseid, 'questionid' => $qid]);
+            $sk = trim((string)($row['skill_key'] ?? ''));
+            if ($sk === '' || $sk === '_none') {
+                continue;
+            }
+            if (empty($valid[$sk])) {
+                continue;
+            }
+            $now = time();
+            $DB->insert_record(self::TABLE_QMAP, (object)[
+                'courseid' => $courseid,
+                'questionid' => $qid,
+                'skill_key' => $sk,
+                'timecreated' => $now,
+                'timemodified' => $now,
+            ]);
+        }
+    }
+
+    /**
+     * Recompute materialized analytics for all finished quiz attempts in a course (e.g. after question→skill changes).
+     *
+     * @param int $courseid
+     * @return void
+     */
+    public static function rebuild_course_quiz_attempts(int $courseid): void {
+        global $DB, $CFG;
+
+        require_once($CFG->dirroot . '/mod/quiz/locallib.php');
+
+        if (class_exists('\core_php_time_limit')) {
+            \core_php_time_limit::raise(600);
+        }
+
+        $attemptids = $DB->get_fieldset_sql(
+            "SELECT qa.id
+               FROM {quiz_attempts} qa
+               JOIN {quiz} q ON q.id = qa.quiz
+              WHERE q.course = :courseid
+                AND qa.preview = 0
+                AND qa.state = :state
+           ORDER BY qa.id ASC",
+            [
+                'courseid' => $courseid,
+                'state' => \mod_quiz\quiz_attempt::FINISHED,
+            ]
+        );
+
+        foreach ($attemptids as $aid) {
+            try {
+                cache_manager::recompute_attempt((int)$aid);
+            } catch (\Throwable $e) {
+                debugging('local_skillradar rebuild attempt ' . $aid . ': ' . $e->getMessage(), DEBUG_DEVELOPER);
+            }
+        }
+
+        self::invalidate_course_cache($courseid);
     }
 }

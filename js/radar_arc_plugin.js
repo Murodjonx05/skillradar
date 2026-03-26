@@ -145,6 +145,135 @@
     }
 
     /**
+     * @param {Array<{x: number, y: number}>} pts
+     * @param {number} i
+     * @param {number} cx0
+     * @param {number} cy0
+     * @param {number} maxDist
+     * @param {number} headroomK
+     * @param {number} chordK
+     * @returns {{nextPoint: {x: number, y: number}, control1: {x: number, y: number}, control2: {x: number, y: number}}}
+     */
+    function buildBulgedSegment(pts, i, cx0, cy0, maxDist, headroomK, chordK) {
+        var nextIndex = (i + 1) % pts.length;
+        var start = pts[i];
+        var end = pts[nextIndex];
+        var startAngle = Math.atan2(start.y - cy0, start.x - cx0);
+        var endAngle = Math.atan2(end.y - cy0, end.x - cx0);
+        var startRadius = Math.hypot(start.x - cx0, start.y - cy0);
+        var endRadius = Math.hypot(end.x - cx0, end.y - cy0);
+        var deltaAngle = shortestAngleDelta(startAngle, endAngle);
+        var deltaRadius = endRadius - startRadius;
+        var chord = Math.hypot(end.x - start.x, end.y - start.y);
+        var rawControl1 = {
+            x: cx0 + (startRadius + deltaRadius / 3) * Math.cos(startAngle + deltaAngle / 3),
+            y: cy0 + (startRadius + deltaRadius / 3) * Math.sin(startAngle + deltaAngle / 3)
+        };
+        var rawControl2 = {
+            x: cx0 + (startRadius + (2 * deltaRadius) / 3) * Math.cos(startAngle + (2 * deltaAngle) / 3),
+            y: cy0 + (startRadius + (2 * deltaRadius) / 3) * Math.sin(startAngle + (2 * deltaAngle) / 3)
+        };
+
+        return {
+            nextPoint: end,
+            control1: bulgeControl(cx0, cy0, rawControl1.x, rawControl1.y, maxDist, chord, 1 / 3, headroomK, chordK),
+            control2: bulgeControl(cx0, cy0, rawControl2.x, rawControl2.y, maxDist, chord, 2 / 3, headroomK, chordK)
+        };
+    }
+
+    /**
+     * @param {CanvasRenderingContext2D} ctx
+     * @param {Array<{x: number, y: number}>} pts
+     * @param {number} cx0
+     * @param {number} cy0
+     * @param {number} maxDist
+     * @param {number} headroomK
+     * @param {number} chordK
+     */
+    function drawBulgedBezierPath(ctx, pts, cx0, cy0, maxDist, headroomK, chordK) {
+        var i;
+        ctx.moveTo(pts[0].x, pts[0].y);
+        for (i = 0; i < pts.length; i++) {
+            var segment = buildBulgedSegment(pts, i, cx0, cy0, maxDist, headroomK, chordK);
+            ctx.bezierCurveTo(
+                segment.control1.x,
+                segment.control1.y,
+                segment.control2.x,
+                segment.control2.y,
+                segment.nextPoint.x,
+                segment.nextPoint.y
+            );
+        }
+    }
+
+    /**
+     * @param {CanvasRenderingContext2D} ctx
+     * @param {Array<{x: number, y: number}>} pts
+     * @param {number} cx0
+     * @param {number} cy0
+     * @param {number} maxDist
+     * @param {number} headroomK
+     * @param {number} chordK
+     * @param {number} steps
+     * @param {number} phase
+     * @param {number} ampPx
+     */
+    function drawWavyBezierPath(ctx, pts, cx0, cy0, maxDist, headroomK, chordK, steps, phase, ampPx) {
+        var interiorPerRing = pts.length * (steps - 1);
+        var globalIndex = 0;
+        var i;
+        ctx.moveTo(pts[0].x, pts[0].y);
+        for (i = 0; i < pts.length; i++) {
+            var segment = buildBulgedSegment(pts, i, cx0, cy0, maxDist, headroomK, chordK);
+            var stepIndex;
+            for (stepIndex = 1; stepIndex < steps; stepIndex++) {
+                var t = stepIndex / steps;
+                var point = cubicBezierPoint(pts[i], segment.control1, segment.control2, segment.nextPoint, t);
+                var globalT = interiorPerRing > 0 ? globalIndex / interiorPerRing : 0;
+                var noise = waveNoiseRadial(globalT, phase, ampPx);
+                var wobble = applyRadialDelta(cx0, cy0, point.x, point.y, noise, maxDist);
+                globalIndex += 1;
+                ctx.lineTo(wobble.x, wobble.y);
+            }
+            ctx.lineTo(segment.nextPoint.x, segment.nextPoint.y);
+        }
+    }
+
+    /**
+     * @param {CanvasRenderingContext2D} ctx
+     * @param {object} ds
+     * @param {boolean} useWave
+     * @param {string} border
+     * @param {number} strokeW
+     */
+    function strokeRadarPath(ctx, ds, useWave, border, strokeW) {
+        ctx.lineJoin = 'round';
+        ctx.lineCap = 'round';
+        if (ds.borderDash && ds.borderDash.length) {
+            ctx.setLineDash(ds.borderDash);
+        } else {
+            ctx.setLineDash([]);
+        }
+
+        if (useWave && ds.radarWaveGlow !== false) {
+            var blur = typeof ds.radarWaveShadowBlur === 'number' ? ds.radarWaveShadowBlur : 12;
+            var shadowColor = typeof ds.radarWaveShadowColor === 'string' ? ds.radarWaveShadowColor : border;
+            ctx.strokeStyle = border;
+            ctx.lineWidth = strokeW + 2;
+            ctx.shadowBlur = blur;
+            ctx.shadowColor = shadowColor;
+            ctx.globalAlpha = typeof ds.radarWaveGlowAlpha === 'number' ? ds.radarWaveGlowAlpha : 0.85;
+            ctx.stroke();
+            ctx.shadowBlur = 0;
+            ctx.globalAlpha = 1;
+        }
+
+        ctx.strokeStyle = border;
+        ctx.lineWidth = strokeW;
+        ctx.stroke();
+    }
+
+    /**
      * @param {object} chart Chart.js instance
      * @param {number} datasetIndex
      */
@@ -181,59 +310,9 @@
         ctx.beginPath();
 
         if (!useWave) {
-            ctx.moveTo(pts[0].x, pts[0].y);
-            for (i = 0; i < n; i++) {
-                var ja = (i + 1) % n;
-                var p1a = pts[i];
-                var p2a = pts[ja];
-                var a1 = Math.atan2(p1a.y - cy0, p1a.x - cx0);
-                var a2 = Math.atan2(p2a.y - cy0, p2a.x - cx0);
-                var r1a = Math.hypot(p1a.x - cx0, p1a.y - cy0);
-                var r2a = Math.hypot(p2a.x - cx0, p2a.y - cy0);
-                var dAngA = shortestAngleDelta(a1, a2);
-                var drA = r2a - r1a;
-                var chordA = Math.hypot(p2a.x - p1a.x, p2a.y - p1a.y);
-                var c1xa = cx0 + (r1a + drA / 3) * Math.cos(a1 + dAngA / 3);
-                var c1ya = cy0 + (r1a + drA / 3) * Math.sin(a1 + dAngA / 3);
-                var c2xa = cx0 + (r1a + (2 * drA) / 3) * Math.cos(a1 + (2 * dAngA) / 3);
-                var c2ya = cy0 + (r1a + (2 * drA) / 3) * Math.sin(a1 + (2 * dAngA) / 3);
-                var b1a = bulgeControl(cx0, cy0, c1xa, c1ya, maxDist, chordA, 1 / 3, headroomK, chordK);
-                var b2a = bulgeControl(cx0, cy0, c2xa, c2ya, maxDist, chordA, 2 / 3, headroomK, chordK);
-                ctx.bezierCurveTo(b1a.x, b1a.y, b2a.x, b2a.y, p2a.x, p2a.y);
-            }
+            drawBulgedBezierPath(ctx, pts, cx0, cy0, maxDist, headroomK, chordK);
         } else {
-            var interiorPerRing = n * (steps - 1);
-            var g = 0;
-            ctx.moveTo(pts[0].x, pts[0].y);
-            for (i = 0; i < n; i++) {
-                var jb = (i + 1) % n;
-                var p0b = pts[i];
-                var p3b = pts[jb];
-                var b1b = Math.atan2(p0b.y - cy0, p0b.x - cx0);
-                var b2b = Math.atan2(p3b.y - cy0, p3b.x - cx0);
-                var r1b = Math.hypot(p0b.x - cx0, p0b.y - cy0);
-                var r2b = Math.hypot(p3b.x - cx0, p3b.y - cy0);
-                var dAngB = shortestAngleDelta(b1b, b2b);
-                var drB = r2b - r1b;
-                var chordB = Math.hypot(p3b.x - p0b.x, p3b.y - p0b.y);
-                var c1xb = cx0 + (r1b + drB / 3) * Math.cos(b1b + dAngB / 3);
-                var c1yb = cy0 + (r1b + drB / 3) * Math.sin(b1b + dAngB / 3);
-                var c2xb = cx0 + (r1b + (2 * drB) / 3) * Math.cos(b1b + (2 * dAngB) / 3);
-                var c2yb = cy0 + (r1b + (2 * drB) / 3) * Math.sin(b1b + (2 * dAngB) / 3);
-                var b1c = bulgeControl(cx0, cy0, c1xb, c1yb, maxDist, chordB, 1 / 3, headroomK, chordK);
-                var b2c = bulgeControl(cx0, cy0, c2xb, c2yb, maxDist, chordB, 2 / 3, headroomK, chordK);
-                var k;
-                for (k = 1; k < steps; k++) {
-                    var tb = k / steps;
-                    var ptb = cubicBezierPoint(p0b, b1c, b2c, p3b, tb);
-                    var globalT = interiorPerRing > 0 ? g / interiorPerRing : 0;
-                    g += 1;
-                    var dNoise = waveNoiseRadial(globalT, phase, ampPx);
-                    var wob = applyRadialDelta(cx0, cy0, ptb.x, ptb.y, dNoise, maxDist);
-                    ctx.lineTo(wob.x, wob.y);
-                }
-                ctx.lineTo(p3b.x, p3b.y);
-            }
+            drawWavyBezierPath(ctx, pts, cx0, cy0, maxDist, headroomK, chordK, steps, phase, ampPx);
         }
 
         ctx.closePath();
@@ -243,32 +322,13 @@
             ctx.fill();
         }
 
-        var strokeW = typeof ds.radarArcStrokeWidth === 'number' ? ds.radarArcStrokeWidth : 2.4;
-        var border = ds.borderColor || '#3B82F6';
-        ctx.lineJoin = 'round';
-        ctx.lineCap = 'round';
-        if (ds.borderDash && ds.borderDash.length) {
-            ctx.setLineDash(ds.borderDash);
-        } else {
-            ctx.setLineDash([]);
-        }
-
-        if (useWave && ds.radarWaveGlow !== false) {
-            var blur = typeof ds.radarWaveShadowBlur === 'number' ? ds.radarWaveShadowBlur : 12;
-            var sh = typeof ds.radarWaveShadowColor === 'string' ? ds.radarWaveShadowColor : border;
-            ctx.strokeStyle = border;
-            ctx.lineWidth = strokeW + 2;
-            ctx.shadowBlur = blur;
-            ctx.shadowColor = sh;
-            ctx.globalAlpha = typeof ds.radarWaveGlowAlpha === 'number' ? ds.radarWaveGlowAlpha : 0.85;
-            ctx.stroke();
-            ctx.shadowBlur = 0;
-            ctx.globalAlpha = 1;
-        }
-
-        ctx.strokeStyle = border;
-        ctx.lineWidth = strokeW;
-        ctx.stroke();
+        strokeRadarPath(
+            ctx,
+            ds,
+            useWave,
+            ds.borderColor || '#3B82F6',
+            typeof ds.radarArcStrokeWidth === 'number' ? ds.radarArcStrokeWidth : 2.4
+        );
         ctx.restore();
     }
 

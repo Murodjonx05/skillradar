@@ -86,6 +86,38 @@ function local_skillradar_should_show_panel(int $courseid, \context_course $cont
     return \local_skillradar\manager::is_course_skillradar_ready($courseid);
 }
 
+/**
+ * Collapsible debug block under a chart (meta + JSON + Chart.js slot).
+ *
+ * @param string $which 'course' (chart payload slice key)
+ * @return string
+ */
+function local_skillradar_chart_debug_block(string $which): string {
+    $title = get_string('chartdebug_course_title', 'local_skillradar');
+    $idmeta = 'local-skillradar-debug-' . $which . '-meta';
+    $idjson = 'local-skillradar-debug-' . $which . '-json';
+    $idchartjs = 'local-skillradar-debug-' . $which . '-chartjs';
+
+    $nested = html_writer::tag(
+        'details',
+        html_writer::tag('summary', get_string('chartdebug_chartjs', 'local_skillradar'), ['class' => 'local-skillradar-chart-debug-summary local-skillradar-chart-debug-summary--nested']) .
+        html_writer::tag('pre', '', ['class' => 'local-skillradar-chart-debug-json local-skillradar-chart-debug-json--chartjs', 'id' => $idchartjs]),
+        ['class' => 'local-skillradar-chart-debug-nested']
+    );
+
+    return html_writer::div(
+        html_writer::tag(
+            'details',
+            html_writer::tag('summary', $title, ['class' => 'local-skillradar-chart-debug-summary']) .
+            html_writer::div('', 'local-skillradar-chart-debug-meta', ['id' => $idmeta]) .
+            html_writer::tag('pre', '', ['class' => 'local-skillradar-chart-debug-json', 'id' => $idjson]) .
+            $nested,
+            ['class' => 'local-skillradar-chart-debug']
+        ),
+        'local-skillradar-chart-debug-outer'
+    );
+}
+
 function local_skillradar_before_http_headers() {
     global $PAGE;
 
@@ -124,9 +156,93 @@ function local_skillradar_extend_navigation_course($navigation, $course, $contex
         'local_skillradar',
         new pix_icon('i/settings', '')
     );
+    $navigation->add(
+        get_string('mapquestions', 'local_skillradar'),
+        new moodle_url('/local/skillradar/map_questions.php', ['courseid' => $course->id]),
+        navigation_node::TYPE_SETTING,
+        null,
+        'local_skillradar_qmap',
+        new pix_icon('i/item', '')
+    );
+}
+
+/**
+ * Banner on question-bank related pages: link to per-question skill mapping (managers only).
+ *
+ * @return string
+ */
+function local_skillradar_question_bank_skill_notice_html(): string {
+    global $PAGE;
+
+    $path = $PAGE->url->get_path(false);
+    if (strpos($path, '/local/skillradar/') !== false) {
+        return '';
+    }
+    if (strpos($path, '/question/') === false) {
+        return '';
+    }
+
+    $courseid = 0;
+    $cid = optional_param('courseid', 0, PARAM_INT);
+    if ($cid > 0) {
+        $courseid = (int)$cid;
+    } else {
+        $cmid = optional_param('cmid', 0, PARAM_INT);
+        if ($cmid > 0) {
+            $cm = get_coursemodule_from_id('', $cmid, 0, false, IGNORE_MISSING);
+            if ($cm) {
+                $courseid = (int)$cm->course;
+            }
+        }
+    }
+    if ($courseid < 1 && !empty($PAGE->course->id) && (int)$PAGE->course->id > 1) {
+        $courseid = (int)$PAGE->course->id;
+    }
+    if ($courseid < 1) {
+        return '';
+    }
+
+    $context = context_course::instance($courseid);
+    if (!has_capability('local/skillradar:manage', $context)) {
+        return '';
+    }
+
+    $text = get_string('questionbankskillhint', 'local_skillradar') . ' ';
+    if (\core\plugininfo\qbank::is_plugin_enabled('qbank_skillradar')
+            && class_exists(\local_skillradar\manager::class)
+            && \local_skillradar\manager::qmap_table_exists()
+            && !empty(\local_skillradar\manager::get_definitions($courseid))) {
+        $text .= get_string('mapquestions_banner_column', 'local_skillradar');
+        return html_writer::div(
+            html_writer::div($text, 'mb-0'),
+            'alert alert-info local-skillradar-qbank-hint mb-3'
+        );
+    }
+
+    $mapurl = new moodle_url('/local/skillradar/map_questions.php', ['courseid' => $courseid]);
+    $text .= get_string('mapquestions_banner', 'local_skillradar');
+    $link = html_writer::link(
+        $mapurl,
+        get_string('mapquestions_open', 'local_skillradar'),
+        ['class' => 'btn btn-primary mt-2']
+    );
+
+    return html_writer::div(
+        html_writer::div($text, 'mb-0') . $link,
+        'alert alert-info local-skillradar-qbank-hint mb-3'
+    );
 }
 
 function local_skillradar_before_footer() {
+    return local_skillradar_question_bank_skill_notice_html() . local_skillradar_render_grade_report_panel();
+}
+
+/**
+ * Skill Radar chart on grader / user grade report only (course-wide skills).
+ *
+ * @return string
+ */
+function local_skillradar_render_grade_report_panel(): string {
     global $CFG;
 
     $pageconfig = local_skillradar_get_report_page_config();
@@ -141,6 +257,9 @@ function local_skillradar_before_footer() {
     }
 
     $debugskillradar = !empty($CFG->debugdeveloper) && has_capability('local/skillradar:manage', $context);
+    $chartdebug = has_capability('local/skillradar:manage', $context)
+        || has_capability('moodle/grade:viewall', $context)
+        || !empty($CFG->debugdeveloper);
     $userid = (int)$pageconfig['userid'];
     $coursecfg = \local_skillradar\manager::get_course_config($courseid);
     $primary = $coursecfg->primarycolor ?? '#3B82F6';
@@ -159,12 +278,31 @@ function local_skillradar_before_footer() {
             'noResults' => get_string('noresults', 'local_skillradar'),
             'courseAverageLegend' => get_string('courseaveragelegend', 'local_skillradar'),
             'fetchError' => get_string('fetcherror', 'local_skillradar'),
+            'radarQuizModulesDataset' => get_string('radarquizmodulesdataset', 'local_skillradar'),
+            'radarQuestionSkillsDataset' => get_string('radarquestionskillsdataset', 'local_skillradar'),
+            'radarCourseSkillsDataset' => get_string('radarcourseskillsdataset', 'local_skillradar'),
+            'radarQuizModulesAvg' => get_string('radarquizmodulesavg', 'local_skillradar'),
+            'chartdebugCourseTitle' => get_string('chartdebug_course_title', 'local_skillradar'),
+            'chartdebugFullTitle' => get_string('chartdebug_full_title', 'local_skillradar'),
+            'chartdebugRequest' => get_string('chartdebug_request', 'local_skillradar'),
+            'chartdebugLabels' => get_string('chartdebug_labels', 'local_skillradar'),
+            'chartdebugValues' => get_string('chartdebug_values', 'local_skillradar'),
+            'chartdebugOverall' => get_string('chartdebug_overall', 'local_skillradar'),
+            'chartdebugChartjs' => get_string('chartdebug_chartjs', 'local_skillradar'),
+            'chartdebugNoPayload' => get_string('chartdebug_no_payload', 'local_skillradar'),
         ],
         'debugSkillRadar' => $debugskillradar,
+        'chartDebug' => $chartdebug,
     ];
 
     $heading = html_writer::tag('h4', get_string('graderblocktitle', 'local_skillradar'));
-    $help = html_writer::div(get_string('graderhelp', 'local_skillradar'), 'text-muted small mb-2');
+    $help = html_writer::div(get_string('graderhelp', 'local_skillradar'), 'text-muted small mb-2') .
+        html_writer::tag(
+            'details',
+            html_writer::tag('summary', get_string('skillmodel_summary', 'local_skillradar'), ['class' => 'small fw-bold']) .
+            html_writer::div(get_string('skillmodel_help', 'local_skillradar'), 'text-muted small mt-2'),
+            ['class' => 'mb-2 local-skillradar-skillmodel']
+        );
     $toolbar = '';
     if (has_capability('local/skillradar:manage', $context)) {
         $toolbar = html_writer::div(
@@ -177,7 +315,7 @@ function local_skillradar_before_footer() {
         );
     }
 
-    $chart = html_writer::div(
+    $chartwrap = html_writer::div(
         html_writer::tag('canvas', '', ['id' => 'local-skillradar-canvas']) .
         html_writer::div(
             html_writer::div(
@@ -188,16 +326,39 @@ function local_skillradar_before_footer() {
             ),
             'local-skillradar-center-anchor'
         ),
-        'local-skillradar-chartwrap'
+        'local-skillradar-chartwrap local-skillradar-chartwrap--course'
     );
-    $results = html_writer::div('', 'local-skillradar-results', ['id' => 'local-skillradar-results']);
+    $sectioncourse = html_writer::div(
+        html_writer::tag('h5', get_string('radarsectionunified', 'local_skillradar'), ['class' => 'local-skillradar-section-title']) .
+        $chartwrap .
+        html_writer::div('', 'local-skillradar-course-overall text-muted small mb-1', ['id' => 'local-skillradar-course-overall']) .
+        html_writer::div('', 'local-skillradar-results', ['id' => 'local-skillradar-results']) .
+        ($chartdebug ? local_skillradar_chart_debug_block('course') : ''),
+        'local-skillradar-section local-skillradar-section--course'
+    );
     $debugblocks = '';
     if ($debugskillradar) {
-        $debugblocks = html_writer::div('', 'local-skillradar-textdebug', ['id' => 'local-skillradar-text']) .
-            html_writer::tag('pre', '', ['class' => 'local-skillradar-jsondebug', 'id' => 'local-skillradar-json']);
+        $debugblocks = html_writer::div(
+            html_writer::div('', 'local-skillradar-textdebug', ['id' => 'local-skillradar-text']) .
+            html_writer::tag('pre', '', ['class' => 'local-skillradar-jsondebug', 'id' => 'local-skillradar-json']),
+            'local-skillradar-debug-legacy-wrap'
+        );
+    }
+    $fulldebug = '';
+    if ($chartdebug) {
+        $fulldebug = html_writer::div(
+            html_writer::tag(
+                'details',
+                html_writer::tag('summary', get_string('chartdebug_full_title', 'local_skillradar'), ['class' => 'local-skillradar-chart-debug-summary']) .
+                html_writer::div('', 'local-skillradar-chart-debug-meta', ['id' => 'local-skillradar-debug-full-meta']) .
+                html_writer::tag('pre', '', ['class' => 'local-skillradar-chart-debug-json', 'id' => 'local-skillradar-debug-full-json']),
+                ['class' => 'local-skillradar-chart-debug']
+            ),
+            'local-skillradar-debug-api-wrap'
+        );
     }
     $body = html_writer::div(
-        $chart . $results . $debugblocks,
+        $sectioncourse . $fulldebug . $debugblocks,
         'local-skillradar-body'
     );
 
@@ -220,3 +381,4 @@ function local_skillradar_before_footer() {
         "})();"
     );
 }
+

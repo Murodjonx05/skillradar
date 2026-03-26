@@ -13,11 +13,14 @@ require_once($CFG->libdir . '/grade/grade_grade.php');
 use grade_grade;
 use grade_item;
 
+/**
+ * Grade-item weighted skill axes (legacy mapping UI).
+ */
 class calculator {
     public const MIN_AXES = 3;
 
     /**
-     * Max points from activity settings (e.g. quiz "Оцениваемый балл"), not only grade_item row.
+     * Max points from activity settings (e.g. quiz grade), not only grade_item row.
      *
      * @return float[]|null [grademin, grademax] or null to use generic logic
      */
@@ -42,8 +45,7 @@ class calculator {
     }
 
     /**
-     * Percent 0–100: (полученный балл − min) / (max − min) × 100.
-     * For quiz/assign uses max from activity; otherwise raw range or grade_item scale.
+     * Percent 0–100 from grade_grade + grade_item.
      */
     protected static function grade_percent_from_grade(grade_grade $grade, grade_item $gradeitem): ?float {
         $activityrange = self::get_activity_grade_range($gradeitem);
@@ -88,6 +90,26 @@ class calculator {
         return (((float) $grade->finalgrade - $gmin) / $grange) * 100.0;
     }
 
+    /**
+     * Percent 0–100 for a course grade item (e.g. quiz module total).
+     *
+     * @param int $courseid
+     * @param int $gradeitemid
+     * @param int $userid
+     * @return float|null
+     */
+    public static function percent_for_grade_item(int $courseid, int $gradeitemid, int $userid): ?float {
+        $gi = grade_item::fetch(['id' => $gradeitemid, 'courseid' => $courseid]);
+        if (!$gi) {
+            return null;
+        }
+        $grade = grade_grade::fetch(['itemid' => $gi->id, 'userid' => $userid]);
+        if (!$grade) {
+            return null;
+        }
+        return self::grade_percent_from_grade($grade, $gi);
+    }
+
     public static function build_payload(int $courseid, int $userid, bool $withcourseavg = false): array {
         $config = manager::get_course_config($courseid);
         $definitions = manager::get_definitions($courseid);
@@ -119,7 +141,7 @@ class calculator {
         return $payload;
     }
 
-    protected static function build_skill_rows(int $courseid, int $userid, array $definitions, array $mappings): array {
+    public static function build_skill_rows(int $courseid, int $userid, array $definitions, array $mappings): array {
         $rows = [];
         foreach ($definitions as $definition) {
             $rows[$definition->skill_key] = [
@@ -197,7 +219,7 @@ class calculator {
         return $skills;
     }
 
-    protected static function build_chart_meta(array $detail): array {
+    public static function build_chart_meta(array $detail): array {
         $labels = [];
         $values = [];
         $colors = [];
@@ -231,7 +253,7 @@ class calculator {
         ];
     }
 
-    protected static function build_mapping_meta(int $courseid, array $definitions, array $mappings): array {
+    public static function build_mapping_meta(int $courseid, array $definitions, array $mappings): array {
         global $DB;
         $meta = [];
         foreach ($definitions as $definition) {
@@ -261,7 +283,6 @@ class calculator {
                 $gmin = $activityrange[0];
                 $gmax = $activityrange[1];
             } else {
-                // Grader cell: raw points; sample range from grade_grades when useful.
                 $sample = $DB->get_record_sql(
                     "SELECT rawgrademin, rawgrademax
                        FROM {grade_grades}
@@ -299,7 +320,7 @@ class calculator {
         return array_values($meta);
     }
 
-    protected static function compute_overall(int $courseid, int $userid, \stdClass $config, array $detail): array {
+    public static function compute_overall(int $courseid, int $userid, \stdClass $config, array $detail): array {
         $percent = null;
         $letter = '';
 
@@ -329,7 +350,6 @@ class calculator {
                 $letter = self::percent_to_letter($percent);
             }
         } else {
-            // Average mode: mean of skills that have a grade (non-null); ungraded axes are excluded.
             $nonempty = [];
             foreach ($detail as $row) {
                 if (!empty($row['placeholder'])) {
@@ -352,9 +372,6 @@ class calculator {
         ];
     }
 
-    /**
-     * Letter grade from percent — same bands as getRank() in js/script.js (grader page).
-     */
     protected static function percent_to_letter(?float $percent): string {
         if ($percent === null) {
             return '';
@@ -404,7 +421,7 @@ class calculator {
         return 'E-';
     }
 
-    protected static function build_course_average(int $courseid, array $detail): array {
+    public static function build_course_average(int $courseid, array $detail): array {
         global $DB;
         $userids = $DB->get_fieldset_sql(
             "SELECT DISTINCT gg.userid

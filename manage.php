@@ -74,7 +74,6 @@ if (data_submitted() && confirm_sesskey()) {
         $pc = clean_param(optional_param('primarycolor', '#3B82F6', PARAM_TEXT), PARAM_TEXT);
         $config->primarycolor = preg_match('/^#[0-9A-Fa-f]{6}$/', $pc) ? $pc : '#3B82F6';
         \local_skillradar\manager::save_course_config($config);
-        \local_skillradar\manager::invalidate_course_cache($courseid);
     } else if ($action === 'savemaps') {
         $rows = [];
         foreach ($DB->get_records('grade_items', ['courseid' => $courseid], 'sortorder ASC') as $item) {
@@ -132,6 +131,20 @@ $previewconfig = [
 echo $OUTPUT->header();
 echo $OUTPUT->heading(get_string('manageheading', 'local_skillradar'));
 
+echo html_writer::div(
+    html_writer::tag('h3', get_string('sectionmapquestions', 'local_skillradar'), ['class' => 'h4']) .
+    html_writer::div(get_string('sectionmapquestions_desc', 'local_skillradar'), 'text-muted mb-3') .
+    html_writer::link(
+        new moodle_url('/local/skillradar/map_questions.php', ['courseid' => $courseid]),
+        get_string('mapquestions_open', 'local_skillradar'),
+        ['class' => 'btn btn-primary btn-lg']
+    ),
+    'border rounded p-3 mb-4 bg-light'
+);
+
+echo html_writer::div(get_string('analyticsintro', 'local_skillradar'), 'alert alert-info mb-3');
+echo html_writer::div(get_string('skillcategoryintro', 'local_skillradar'), 'alert alert-secondary mb-3');
+
 echo html_writer::tag('h3', get_string('sectionskills', 'local_skillradar'));
 echo '<form method="post" action="' . s($PAGE->url->out(false)) . '" class="mb-3">';
 echo '<input type="hidden" name="sesskey" value="' . sesskey() . '" />';
@@ -188,6 +201,7 @@ echo '<div class="mb-3"><label class="form-label" for="id_overallmode">' . get_s
     html_writer::tag('select', $selectoptions, ['name' => 'overallmode', 'id' => 'id_overallmode', 'class' => 'form-select']) .
     '</div>';
 echo '<p class="text-muted small mb-3">' . get_string('minaxesauto', 'local_skillradar') . '</p>';
+echo '<p class="text-muted small mb-3">' . get_string('analyticsrules', 'local_skillradar') . '</p>';
 echo '<div class="mb-3"><label class="form-label" for="id_primarycolor">' . get_string('primarycolor', 'local_skillradar') . '</label>' .
     '<input class="form-control form-control-color" type="color" name="primarycolor" id="id_primarycolor" value="' .
     s($cfg->primarycolor ?? '#3B82F6') . '" />' .

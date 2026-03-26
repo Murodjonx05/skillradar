@@ -15,7 +15,6 @@ $withavg = optional_param('courseavg', 0, PARAM_BOOL);
 $course = get_course($courseid);
 $context = context_course::instance($courseid);
 
-// User report "all users" mode uses userid=0 — no single-user payload (avoid core_user::get_user(0)).
 if ($userid < 1) {
     header('Content-Type: application/json; charset=utf-8');
     echo json_encode([
@@ -27,8 +26,7 @@ if ($userid < 1) {
     exit;
 }
 
-// Access control aligned with Moodle grade viewing (see gradereport/user/classes/external/user.php).
-if ((int) $userid !== (int) $USER->id) {
+if ((int)$userid !== (int)$USER->id) {
     if (!has_capability('local/skillradar:manage', $context)) {
         require_capability('moodle/grade:viewall', $context);
     }
@@ -55,17 +53,26 @@ if ($withavg && empty($config->courseavg)) {
     $withavg = false;
 }
 
-$cache = cache::make('local_skillradar', 'skillpayload');
-$key = \local_skillradar\manager::cache_key($courseid, $userid) . ($withavg ? '_avg' : '');
+$cache = \cache::make('local_skillradar', 'skillpayload');
+$base = \local_skillradar\manager::cache_key($courseid, $userid);
+$key = $base . ($withavg ? '_avg' : '');
+
 $payload = $cache->get($key);
-if ($payload === false) {
-    $payload = \local_skillradar\calculator::build_payload($courseid, $userid, (bool) $withavg);
+if ($payload === false || !isset($payload['course_skills_radar'])) {
+    $payload = \local_skillradar\hybrid_provider::get_course_skill_radar($userid, $courseid, (bool)$withavg);
     $cache->set($key, $payload);
 }
 
-$payload['strings'] = [
+$payload['strings'] = array_merge($payload['strings'] ?? [], [
     'notConfigured' => get_string('notconfigured', 'local_skillradar'),
-];
+    'noResults' => get_string('noresults', 'local_skillradar'),
+    'resultBreakdown' => get_string('resultbreakdown', 'local_skillradar'),
+    'courseAverageLegend' => get_string('courseaveragelegend', 'local_skillradar'),
+    'radarQuizModulesDataset' => get_string('radarquizmodulesdataset', 'local_skillradar'),
+    'radarQuestionSkillsDataset' => get_string('radarquestionskillsdataset', 'local_skillradar'),
+    'radarCourseSkillsDataset' => get_string('radarcourseskillsdataset', 'local_skillradar'),
+    'radarQuizModulesAvg' => get_string('radarquizmodulesavg', 'local_skillradar'),
+]);
 
 header('Content-Type: application/json; charset=utf-8');
 echo json_encode($payload);

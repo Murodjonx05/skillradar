@@ -1,5 +1,23 @@
 /* local_skillradar */
 
+.local-skillradar-skillmodel summary {
+    cursor: pointer;
+    color: #334155;
+}
+
+.local-skillradar-skillmodel summary::-webkit-details-marker {
+    display: none;
+}
+
+.local-skillradar-skillmodel summary::before {
+    content: '▸ ';
+    color: #64748b;
+}
+
+.local-skillradar-skillmodel[open] summary::before {
+    content: '▾ ';
+}
+
 .local-skillradar-panel {
     margin: 1rem 0 2rem;
     padding: 1rem 1.25rem;
@@ -11,6 +29,122 @@
 .local-skillradar-body {
     display: grid;
     gap: 1rem;
+}
+
+.local-skillradar-body > .local-skillradar-debug-api-wrap,
+.local-skillradar-body > .local-skillradar-debug-legacy-wrap {
+    grid-column: 1 / -1;
+}
+
+.local-skillradar-chart-debug-outer {
+    margin-top: 0.75rem;
+}
+
+.local-skillradar-chart-debug {
+    margin-top: 0.35rem;
+    padding: 0.5rem 0.65rem;
+    border: 1px solid rgba(148, 163, 184, 0.45);
+    border-radius: 10px;
+    background: rgba(248, 250, 252, 0.95);
+}
+
+.local-skillradar-chart-debug-summary {
+    cursor: pointer;
+    font-weight: 700;
+    font-size: 0.85rem;
+    color: #0f172a;
+    list-style: none;
+}
+
+.local-skillradar-chart-debug-summary::-webkit-details-marker {
+    display: none;
+}
+
+.local-skillradar-chart-debug-summary::before {
+    content: '▸ ';
+    color: #64748b;
+}
+
+details[open] > .local-skillradar-chart-debug-summary::before {
+    content: '▾ ';
+}
+
+.local-skillradar-chart-debug-meta {
+    margin: 0.5rem 0 0.35rem;
+    padding: 0.5rem 0.65rem;
+    border-radius: 8px;
+    background: #fff;
+    border: 1px solid rgba(148, 163, 184, 0.25);
+}
+
+.local-skillradar-debug-dl dt {
+    font-weight: 600;
+    color: #475569;
+}
+
+.local-skillradar-debug-dl dd {
+    margin-bottom: 0.35rem;
+    word-break: break-word;
+}
+
+.local-skillradar-debug-url {
+    word-break: break-all;
+    font-size: 0.78rem;
+}
+
+.local-skillradar-chart-debug-json {
+    display: block;
+    max-height: 320px;
+    margin: 0.5rem 0 0;
+    padding: 0.65rem 0.75rem;
+    overflow: auto;
+    border-radius: 8px;
+    background: #0f172a;
+    color: #e2e8f0;
+    font-size: 0.72rem;
+    line-height: 1.45;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.local-skillradar-chart-debug-json--chartjs {
+    max-height: 200px;
+}
+
+.local-skillradar-chart-debug-nested {
+    margin-top: 0.5rem;
+    padding: 0.35rem 0.5rem;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.6);
+    border: 1px dashed rgba(148, 163, 184, 0.5);
+}
+
+.local-skillradar-chart-debug-summary--nested {
+    font-size: 0.8rem;
+    font-weight: 600;
+}
+
+.local-skillradar-debug-api-wrap {
+    margin-top: 1rem;
+}
+
+.local-skillradar-section-title {
+    margin: 0 0 0.5rem;
+    font-size: 1rem;
+    font-weight: 700;
+    color: #0f172a;
+}
+
+.local-skillradar-chartwrap--quizmod,
+.local-skillradar-chartwrap--course {
+    min-height: 320px;
+    height: min(520px, 80vw);
+}
+
+.local-skillradar-section--quizmod .local-skillradar-results,
+.local-skillradar-section--skills .local-skillradar-results,
+.local-skillradar-section--course .local-skillradar-results {
+    max-width: 100%;
 }
 
 .local-skillradar-chartwrap {
