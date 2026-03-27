@@ -32,4 +32,8 @@ $observers = [
         'eventname' => '\core\event\question_created',
         'callback' => '\local_skillradar\observer::question_created',
     ],
+    [
+        'eventname' => '\core\event\question_updated',
+        'callback' => '\local_skillradar\observer::question_updated',
+    ],
 ];

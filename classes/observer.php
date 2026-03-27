@@ -65,14 +65,21 @@ class observer {
         cache_manager::recompute_attempt($attemptid);
     }
 
+    public static function question_created(\core\event\question_created $event): void {
+        self::persist_question_skill_mapping($event);
+    }
+
+    public static function question_updated(\core\event\question_updated $event): void {
+        self::persist_question_skill_mapping($event);
+    }
+
     /**
-     * Persists question→skill_key from the question edit form (POST skillradar_skill_key).
-     * Runs on question_created because each save creates a new question version row.
+     * Persists question→skill_key from the question edit form for created/updated question versions.
      *
-     * @param \core\event\question_created $event
+     * @param \core\event\base $event
      * @return void
      */
-    public static function question_created(\core\event\question_created $event): void {
+    private static function persist_question_skill_mapping(\core\event\base $event): void {
         $requestmethod = $_SERVER['REQUEST_METHOD'] ?? '';
         if ($requestmethod !== 'POST' || !array_key_exists('skillradar_skill_key', $_POST)) {
             return;

@@ -80,10 +80,17 @@ if (data_submitted() && confirm_sesskey()) {
         \local_skillradar\manager::save_course_config($config);
     } else if ($action === 'savemaps') {
         $rows = [];
+        $validkeys = [];
+        foreach (\local_skillradar\manager::get_definitions($courseid) as $definition) {
+            $validkeys[(string)$definition->skill_key] = true;
+        }
         foreach ($DB->get_records('grade_items', ['courseid' => $courseid], 'sortorder ASC') as $item) {
             $skillkey = clean_param(optional_param('skill_' . $item->id, '', PARAM_ALPHANUMEXT), PARAM_ALPHANUMEXT);
             $weight = optional_param('weight_' . $item->id, 1, PARAM_FLOAT);
             if ($skillkey === '' || $skillkey === '_none') {
+                continue;
+            }
+            if (empty($validkeys[$skillkey])) {
                 continue;
             }
             $rows[] = (object)[

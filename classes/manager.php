@@ -133,7 +133,7 @@ class manager {
                FROM {grade_grades} gg
                JOIN {grade_items} gi ON gi.id = gg.itemid
               WHERE gi.courseid = :courseid
-                AND gg.finalgrade IS NOT NULL
+                AND (gg.finalgrade IS NOT NULL OR gg.rawgrade IS NOT NULL)
            ORDER BY gg.userid ASC",
             ['courseid' => $courseid],
             IGNORE_MULTIPLE

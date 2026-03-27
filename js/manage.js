@@ -193,6 +193,13 @@
         });
     }
 
+    function pickManagePayload(payload) {
+        if (payload && payload.course_skills_radar) {
+            return payload.course_skills_radar;
+        }
+        return payload;
+    }
+
     /**
      * @param {Array} chartVals
      * @param {boolean[]} placeholder
@@ -501,8 +508,9 @@
                 if (seq !== previewSeq) {
                     return undefined;
                 }
-                payload.strings = Object.assign({}, strings, payload.strings || {});
-                var output = hasRealGrades(payload) ? payload : fallback;
+                var chartPayload = pickManagePayload(payload) || {};
+                chartPayload.strings = Object.assign({}, strings, payload.strings || {}, chartPayload.strings || {});
+                var output = hasRealGrades(chartPayload) ? chartPayload : fallback;
                 lastPreviewOutput = output;
                 applyPrimaryColor(root, resolvePrimaryColor(output, cfg.primaryColor));
                 renderChart(canvas, output, {
@@ -514,9 +522,10 @@
                 if (cfg.debugSkillRadar) {
                     renderTextDebug(textdebug, output);
                     renderJsonDebug(jsondebug, {
-                        mode: hasRealGrades(payload) ? 'api-grades' : 'form-preview-fallback',
+                        mode: hasRealGrades(chartPayload) ? 'api-grades' : 'form-preview-fallback',
                         config: cfg,
                         payload: payload,
+                        chartPayload: chartPayload,
                         fallback: fallback
                     });
                 }

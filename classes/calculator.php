@@ -495,7 +495,7 @@ class calculator {
                FROM {grade_grades} gg
                JOIN {grade_items} gi ON gi.id = gg.itemid
               WHERE gi.courseid = ?
-                AND gg.finalgrade IS NOT NULL",
+                AND (gg.finalgrade IS NOT NULL OR gg.rawgrade IS NOT NULL)",
             [$courseid]
         );
 

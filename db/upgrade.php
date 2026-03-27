@@ -157,77 +157,9 @@ function xmldb_local_skillradar_upgrade($oldversion) {
         upgrade_plugin_savepoint(true, 2026033100, 'local', 'skillradar');
     }
 
-    if ($oldversion < 2026033125) {
+    if ($oldversion < 2026033149) {
         \cache::make('local_skillradar', 'skillpayload')->purge();
-        upgrade_plugin_savepoint(true, 2026033125, 'local', 'skillradar');
-    }
-
-    if ($oldversion < 2026033126) {
-        upgrade_plugin_savepoint(true, 2026033126, 'local', 'skillradar');
-    }
-
-    if ($oldversion < 2026033127) {
-        \cache::make('local_skillradar', 'skillpayload')->purge();
-        upgrade_plugin_savepoint(true, 2026033127, 'local', 'skillradar');
-    }
-
-    if ($oldversion < 2026033128) {
-        upgrade_plugin_savepoint(true, 2026033128, 'local', 'skillradar');
-    }
-
-    if ($oldversion < 2026033138) {
-        \cache::make('local_skillradar', 'skillpayload')->purge();
-        upgrade_plugin_savepoint(true, 2026033138, 'local', 'skillradar');
-    }
-
-    if ($oldversion < 2026033139) {
-        \cache::make('local_skillradar', 'skillpayload')->purge();
-        upgrade_plugin_savepoint(true, 2026033139, 'local', 'skillradar');
-    }
-
-    if ($oldversion < 2026033140) {
-        \cache::make('local_skillradar', 'skillpayload')->purge();
-        upgrade_plugin_savepoint(true, 2026033140, 'local', 'skillradar');
-    }
-
-    if ($oldversion < 2026033141) {
-        \cache::make('local_skillradar', 'skillpayload')->purge();
-        upgrade_plugin_savepoint(true, 2026033141, 'local', 'skillradar');
-    }
-
-    if ($oldversion < 2026033142) {
-        \cache::make('local_skillradar', 'skillpayload')->purge();
-        upgrade_plugin_savepoint(true, 2026033142, 'local', 'skillradar');
-    }
-
-    if ($oldversion < 2026033143) {
-        \cache::make('local_skillradar', 'skillpayload')->purge();
-        upgrade_plugin_savepoint(true, 2026033143, 'local', 'skillradar');
-    }
-
-    if ($oldversion < 2026033144) {
-        \cache::make('local_skillradar', 'skillpayload')->purge();
-        upgrade_plugin_savepoint(true, 2026033144, 'local', 'skillradar');
-    }
-
-    if ($oldversion < 2026033145) {
-        \cache::make('local_skillradar', 'skillpayload')->purge();
-        upgrade_plugin_savepoint(true, 2026033145, 'local', 'skillradar');
-    }
-
-    if ($oldversion < 2026033146) {
-        \cache::make('local_skillradar', 'skillpayload')->purge();
-        upgrade_plugin_savepoint(true, 2026033146, 'local', 'skillradar');
-    }
-
-    if ($oldversion < 2026033147) {
-        \cache::make('local_skillradar', 'skillpayload')->purge();
-        upgrade_plugin_savepoint(true, 2026033147, 'local', 'skillradar');
-    }
-
-    if ($oldversion < 2026033148) {
-        \cache::make('local_skillradar', 'skillpayload')->purge();
-        upgrade_plugin_savepoint(true, 2026033148, 'local', 'skillradar');
+        upgrade_plugin_savepoint(true, 2026033149, 'local', 'skillradar');
     }
 
     return true;
