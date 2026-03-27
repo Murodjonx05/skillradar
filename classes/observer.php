@@ -80,16 +80,15 @@ class observer {
      * @return void
      */
     private static function persist_question_skill_mapping(\core\event\base $event): void {
-        $requestmethod = $_SERVER['REQUEST_METHOD'] ?? '';
-        if ($requestmethod !== 'POST' || !array_key_exists('skillradar_skill_key', $_POST)) {
+        if (PHP_SAPI === 'cli' || !data_submitted()) {
             return;
         }
-
-        if (!isset($_POST['cmid'], $_POST['courseid'], $_POST['sesskey'])) {
+        $submission = (array)data_submitted();
+        if (($submission['skillradar_skill_key'] ?? null) === null ||
+                !isset($submission['cmid'], $submission['courseid'], $submission['sesskey'])) {
             return;
         }
-
-        if (!confirm_sesskey($_POST['sesskey'])) {
+        if (!confirm_sesskey((string)$submission['sesskey'])) {
             return;
         }
 
@@ -97,8 +96,8 @@ class observer {
             return;
         }
 
-        $cmid = (int) $_POST['cmid'];
-        $courseid = (int) $_POST['courseid'];
+        $cmid = clean_param($submission['cmid'], PARAM_INT);
+        $courseid = clean_param($submission['courseid'], PARAM_INT);
         if ($cmid < 1 || $courseid < 1) {
             return;
         }
@@ -117,7 +116,7 @@ class observer {
             return;
         }
 
-        $skillkey = clean_param($_POST['skillradar_skill_key'], PARAM_TEXT);
+        $skillkey = clean_param($submission['skillradar_skill_key'], PARAM_TEXT);
         $skillkey = trim($skillkey);
 
         $validkeys = [];
@@ -136,7 +135,7 @@ class observer {
 
         $rows = [[
             'questionid' => $questionid,
-            'skill_key' => ($skillkey === '' || $skillkey === '_none') ? '_none' : $skillkey,
+            'skill_key' => ($skillkey === '' || $skillkey === '_none') ? '' : $skillkey,
         ]];
 
         manager::replace_question_skill_mappings($courseid, $rows);

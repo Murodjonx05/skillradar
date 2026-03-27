@@ -39,9 +39,13 @@ class cache_manager {
             $rows = skill_aggregator::aggregate_attempt($attemptdata);
 
             $transaction = $DB->start_delegated_transaction();
-            self::store_attempt_skills($attemptid, $rows);
-            self::update_user_skills((int)$attempt->userid, (int)$attempt->quizid);
-            $transaction->allow_commit();
+            try {
+                self::store_attempt_skills($attemptid, $rows);
+                self::update_user_skills((int)$attempt->userid, (int)$attempt->quizid);
+                $transaction->allow_commit();
+            } catch (\Throwable $e) {
+                $transaction->rollback($e);
+            }
 
             manager::invalidate_user_cache((int)$attempt->courseid, (int)$attempt->userid);
         } finally {

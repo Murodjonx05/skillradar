@@ -133,7 +133,7 @@
      * @param {{chart?: object, course_average?: object}} payload
      * @returns {Array<number|null>}
      */
-    function alignCourseAverageValuesToChart(payload) {
+    function alignCourseAverageValuesToChart(payload, missingMode) {
         var chart = payload.chart || {};
         var labels = chart.labels || [];
         var placeholder = chart.placeholder || [];
@@ -141,13 +141,18 @@
         var data = [];
         var vidx = 0;
         var i;
+        var mode = missingMode || 'null';
         for (i = 0; i < labels.length; i++) {
             if (placeholder[i]) {
                 data.push(null);
             } else {
                 var raw = vidx < avgVals.length ? avgVals[vidx] : null;
                 vidx++;
-                data.push(raw === null || typeof raw === 'undefined' ? 0 : raw);
+                if (raw === null || typeof raw === 'undefined') {
+                    data.push(mode === 'zero' ? 0 : null);
+                } else {
+                    data.push(raw);
+                }
             }
         }
         return data;

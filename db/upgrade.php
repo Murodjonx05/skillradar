@@ -151,8 +151,15 @@ function xmldb_local_skillradar_upgrade($oldversion) {
             $dbman->create_table($table);
         }
         // Historical analytics used question_categories.id as skillid (positive). Category-based skills are now stored as negative ids so local_skillradar_def.id stays positive.
-        $DB->execute("UPDATE {local_skill_attempt_result} SET skillid = -skillid WHERE skillid > 0");
-        $DB->execute("UPDATE {local_skill_user_result} SET skillid = -skillid WHERE skillid > 0");
+        $transaction = $DB->start_delegated_transaction();
+        try {
+            $DB->execute("UPDATE {local_skill_attempt_result} SET skillid = -skillid WHERE skillid > 0");
+            $DB->execute("UPDATE {local_skill_user_result} SET skillid = -skillid WHERE skillid > 0");
+            $transaction->allow_commit();
+        } catch (\Throwable $e) {
+            $transaction->rollback($e);
+        }
+        \local_skillradar\manager::reset_static_caches();
         \cache::make('local_skillradar', 'skillpayload')->purge();
         upgrade_plugin_savepoint(true, 2026033100, 'local', 'skillradar');
     }

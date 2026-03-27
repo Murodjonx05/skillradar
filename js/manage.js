@@ -270,10 +270,16 @@
         }];
 
         if (payload.course_average && payload.course_average.values) {
+            var avgData = C.alignCourseAverageValuesToChart(payload, 'null');
+            var avgDefinedPoints = avgData.filter(function(value) {
+                return value !== null && typeof value !== 'undefined' &&
+                    !(typeof value === 'number' && isNaN(value));
+            }).length;
+            if (avgDefinedPoints >= 1) {
             datasets.push({
                 label: payload.course_average.label ||
                     ((payload.strings && payload.strings.courseAverageLegend) || 'Course average'),
-                data: C.alignCourseAverageValuesToChart(payload),
+                data: avgData,
                 spanGaps: false,
                 radarArcSegments: true,
                 radarArcStrokeWidth: 1.8,
@@ -302,6 +308,7 @@
                 fill: false,
                 tension: 0
             });
+            }
         }
 
         return datasets;

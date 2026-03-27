@@ -19,6 +19,12 @@ class manager {
 
     /** @var string Application cache key prefix for per-course payload revision. */
     private const CACHE_REV_PREFIX = 'skillradar_rev_';
+    /** @var int Bump when payload structure or aggregation logic changes and cached JSON must be rebuilt. */
+    private const CACHE_FORMAT_VERSION = 2;
+    /** @var null|bool */
+    private static $qmaptableexists = null;
+    /** @var array<int, array<int, int>> */
+    private static $taggedskillquestioncountcache = [];
 
     public static function get_course_config(int $courseid): stdClass {
         global $DB;
@@ -83,6 +89,7 @@ class manager {
             $row->timemodified = $now;
             $DB->insert_record(self::TABLE_MAP, $row);
         }
+        self::invalidate_course_cache($courseid);
     }
 
     /**
@@ -144,6 +151,7 @@ class manager {
     public static function invalidate_course_cache(int $courseid): void {
         $cache = cache::make('local_skillradar', 'skillpayload');
         $cache->set(self::CACHE_REV_PREFIX . $courseid, time());
+        unset(self::$taggedskillquestioncountcache[$courseid]);
     }
 
     public static function invalidate_user_cache(int $courseid, int $userid): void {
@@ -241,7 +249,7 @@ class manager {
 
     public static function cache_key(int $courseid, int $userid): string {
         $r = self::course_payload_revision($courseid);
-        return 'c' . $courseid . '_r' . $r . '_u' . $userid;
+        return 'v' . self::CACHE_FORMAT_VERSION . '_c' . $courseid . '_r' . $r . '_u' . $userid;
     }
 
     /**
@@ -271,13 +279,12 @@ class manager {
      */
     public static function qmap_table_exists(): bool {
         global $DB;
-        static $cache = null;
-        if ($cache !== null) {
-            return $cache;
+        if (self::$qmaptableexists !== null) {
+            return self::$qmaptableexists;
         }
         $dbman = $DB->get_manager();
-        $cache = $dbman->table_exists(new \xmldb_table(self::TABLE_QMAP));
-        return $cache;
+        self::$qmaptableexists = $dbman->table_exists(new \xmldb_table(self::TABLE_QMAP));
+        return self::$qmaptableexists;
     }
 
     /**
@@ -346,13 +353,12 @@ class manager {
      * @return array<int, int> definition id => question count
      */
     public static function get_tagged_skill_question_counts_in_course(int $courseid): array {
-        static $cache = [];
-        if (isset($cache[$courseid])) {
-            return $cache[$courseid];
+        if (isset(self::$taggedskillquestioncountcache[$courseid])) {
+            return self::$taggedskillquestioncountcache[$courseid];
         }
         $questions = self::get_course_quiz_questions($courseid);
         if ($questions === []) {
-            $cache[$courseid] = [];
+            self::$taggedskillquestioncountcache[$courseid] = [];
             return [];
         }
         $counts = [];
@@ -373,7 +379,7 @@ class manager {
             }
             $counts[$sid]++;
         }
-        $cache[$courseid] = $counts;
+        self::$taggedskillquestioncountcache[$courseid] = $counts;
         return $counts;
     }
 
@@ -460,6 +466,17 @@ class manager {
                 'timemodified' => $now,
             ]);
         }
+        self::invalidate_course_cache($courseid);
+    }
+
+    /**
+     * Reset process-local caches. Useful for tests and schema transitions.
+     *
+     * @return void
+     */
+    public static function reset_static_caches(): void {
+        self::$qmaptableexists = null;
+        self::$taggedskillquestioncountcache = [];
     }
 
     /**

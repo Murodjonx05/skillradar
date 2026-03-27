@@ -43,7 +43,7 @@ class grade_provider {
         if ($detail === []) {
             return self::empty_single_quiz_payload($courseid, $includecourseaverage);
         }
-        return self::payload_from_detail($courseid, $detail, $includecourseaverage);
+        return self::payload_from_detail($courseid, $detail, $includecourseaverage, $quizid);
     }
 
     /**
@@ -80,9 +80,10 @@ class grade_provider {
      * @param int $courseid
      * @param array $detail
      * @param bool $includecourseaverage
+     * @param int $quizid 0 = all quizzes (course-level radar), >0 = single quiz filter
      * @return array
      */
-    private static function payload_from_detail(int $courseid, array $detail, bool $includecourseaverage): array {
+    private static function payload_from_detail(int $courseid, array $detail, bool $includecourseaverage, int $quizid = 0): array {
         $config = manager::get_course_config($courseid);
         $chart = self::build_chart_meta($detail);
 
@@ -101,7 +102,7 @@ class grade_provider {
         ];
 
         if ($includecourseaverage && !empty($config->courseavg)) {
-            $payload['course_average'] = self::build_course_average($courseid, $detail);
+            $payload['course_average'] = self::build_course_average($courseid, $detail, $quizid);
         }
 
         return $payload;
@@ -549,7 +550,7 @@ class grade_provider {
             $percent = round($sum / count($available), 2);
         }
 
-        return ['percent' => $percent, 'letter' => null];
+        return ['percent' => $percent, 'letter' => self::percent_to_letter($percent)];
     }
 
     /**
@@ -557,17 +558,34 @@ class grade_provider {
      *
      * @param int $courseid
      * @param array $detail
+     * @param int $quizid 0 = all quizzes, >0 = single quiz filter
      * @return array|null
      */
-    public static function get_materialized_course_average(int $courseid, array $detail): ?array {
-        return self::build_course_average($courseid, $detail);
+    public static function get_materialized_course_average(int $courseid, array $detail, int $quizid = 0): ?array {
+        return self::build_course_average($courseid, $detail, $quizid);
     }
 
-    private static function build_course_average(int $courseid, array $detail): ?array {
+    /**
+     * @param int $courseid
+     * @param array $detail
+     * @param int $quizid 0 = all quizzes, >0 = single quiz filter
+     * @return array|null
+     */
+    private static function build_course_average(int $courseid, array $detail, int $quizid = 0): ?array {
         global $DB;
 
         if (!$detail) {
             return null;
+        }
+
+        $params = [
+            'courseid' => $courseid,
+            'strategy' => cache_manager::STRATEGY_LATEST,
+        ];
+        $quizfilter = '';
+        if ($quizid > 0) {
+            $quizfilter = ' AND quizid = :quizid';
+            $params['quizid'] = $quizid;
         }
 
         $sql = "SELECT skillid,
@@ -577,12 +595,10 @@ class grade_provider {
                  WHERE courseid = :courseid
                    AND aggregation_strategy = :strategy
                    AND skillid > 0
+                   {$quizfilter}
               GROUP BY skillid";
         $byvalues = [];
-        $recordset = $DB->get_records_sql($sql, [
-            'courseid' => $courseid,
-            'strategy' => cache_manager::STRATEGY_LATEST,
-        ]);
+        $recordset = $DB->get_records_sql($sql, $params);
         foreach ($recordset as $record) {
             $sid = (int)$record->skillid;
             $maxsum = (float)$record->maxearned;
@@ -598,7 +614,7 @@ class grade_provider {
             'label' => get_string('courseaveragelegend', 'local_skillradar'),
             'values' => array_map(static function(array $row) use ($byvalues) {
                 $skillid = (int)$row['key'];
-                return $byvalues[$skillid] ?? null;
+                return array_key_exists($skillid, $byvalues) ? $byvalues[$skillid] : null;
             }, $detail),
         ];
 
@@ -728,5 +744,58 @@ class grade_provider {
         $idx = abs($skillid) % count($palette);
 
         return $palette[$idx];
+    }
+
+    /**
+     * @param float|null $percent
+     * @return string|null
+     */
+    private static function percent_to_letter(?float $percent): ?string {
+        if ($percent === null) {
+            return null;
+        }
+        if ($percent >= 95) {
+            return 'S+';
+        }
+        if ($percent >= 90) {
+            return 'S';
+        }
+        if ($percent >= 85) {
+            return 'S-';
+        }
+        if ($percent >= 80) {
+            return 'A+';
+        }
+        if ($percent >= 75) {
+            return 'A';
+        }
+        if ($percent >= 70) {
+            return 'A-';
+        }
+        if ($percent >= 65) {
+            return 'B+';
+        }
+        if ($percent >= 60) {
+            return 'B';
+        }
+        if ($percent >= 55) {
+            return 'B-';
+        }
+        if ($percent >= 50) {
+            return 'C+';
+        }
+        if ($percent >= 40) {
+            return 'C';
+        }
+        if ($percent >= 30) {
+            return 'D';
+        }
+        if ($percent >= 15) {
+            return 'E+';
+        }
+        if ($percent >= 5) {
+            return 'E';
+        }
+        return 'E-';
     }
 }

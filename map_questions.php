@@ -42,9 +42,7 @@ if (data_submitted() && confirm_sesskey()) {
     $rows = [];
     foreach (array_keys($validids) as $qid) {
         $sk = trim((string)optional_param('skill_key_' . $qid, '_none', PARAM_TEXT));
-        if ($sk === '' || $sk === '_none' || !isset($validkeys[$sk])) {
-            $rows[] = ['questionid' => $qid, 'skill_key' => '_none'];
-        } else {
+        if ($sk !== '' && $sk !== '_none' && isset($validkeys[$sk])) {
             $rows[] = ['questionid' => $qid, 'skill_key' => $sk];
         }
     }

@@ -298,15 +298,24 @@
         };
     }
 
-    function buildCourseAverageDataset(payload) {
+    function buildCourseAverageDataset(payload, missingMode, minDefinedPoints) {
         if (!payload.course_average || !payload.course_average.values) {
+            return null;
+        }
+
+        var data = C.alignCourseAverageValuesToChart(payload, missingMode || 'null');
+        var definedPoints = data.filter(function(value) {
+            return value !== null && typeof value !== 'undefined' &&
+                !(typeof value === 'number' && isNaN(value));
+        }).length;
+        if (definedPoints < (minDefinedPoints || 1)) {
             return null;
         }
 
         return {
             label: payload.course_average.label ||
                 ((payload.strings && payload.strings.courseAverageLegend) || 'Course average'),
-            data: C.alignCourseAverageValuesToChart(payload),
+            data: data,
             spanGaps: false,
             radarArcSegments: true,
             radarArcStrokeWidth: 1.8,
@@ -337,7 +346,7 @@
         };
     }
 
-    function buildDatasets(payload, ctx, datasetLabel) {
+    function buildCourseChartDatasets(payload, ctx, datasetLabel) {
         datasetLabel = datasetLabel || 'Skill level (%)';
         var colors = buildPrimaryGradient(payload, ctx);
         var values = normalizeChartValues(payload);
@@ -349,7 +358,28 @@
             colors.solid
         )];
 
-        var courseAverageDataset = buildCourseAverageDataset(payload);
+        var courseAverageDataset = buildCourseAverageDataset(payload, 'null', 1);
+        if (courseAverageDataset) {
+            datasets.push(courseAverageDataset);
+        }
+
+        return datasets;
+    }
+
+    function buildLocalChartDatasets(payload, ctx, datasetLabel) {
+        datasetLabel = datasetLabel || 'Skill level (%)';
+        var colors = buildPrimaryGradient(payload, ctx);
+        var values = normalizeChartValues(payload);
+        var datasets = [buildPrimaryDataset(
+            datasetLabel,
+            values.userValues,
+            values.hasUserValues,
+            colors.gradient,
+            colors.solid
+        )];
+
+        // Local skill radar may legitimately have sparse cohort data while analytics are still filling in.
+        var courseAverageDataset = buildCourseAverageDataset(payload, 'null', 1);
         if (courseAverageDataset) {
             datasets.push(courseAverageDataset);
         }
@@ -375,7 +405,7 @@
         }
     }
 
-    function renderChart(canvas, payload, centerElements, chartHolder, datasetLabel) {
+    function renderChart(canvas, payload, centerElements, chartHolder, datasetLabel, datasetBuilder) {
         chartHolder = chartHolder || chartHolderSkills;
         if (!canvas || typeof Chart === 'undefined') {
             return;
@@ -448,7 +478,7 @@
             type: 'radar',
             data: {
                 labels: labels,
-                datasets: buildDatasets(payload, context, datasetLabel)
+                datasets: datasetBuilder(payload, context, datasetLabel)
             },
             options: {
                 responsive: true,
@@ -632,7 +662,7 @@
                 button: centerButton,
                 value: centerValue,
                 label: centerLabel
-            }, chartHolderSkills, courseLabel);
+            }, chartHolderSkills, courseLabel, buildCourseChartDatasets);
             if ((!coursePayload || !coursePayload.chart) && centerValue) {
                 centerValue.textContent = '—';
                 centerLabel.textContent = 'AVERAGE';
@@ -670,7 +700,7 @@
                 button: centerButtonLocal,
                 value: centerValueLocal,
                 label: centerLabelLocal
-            }, chartHolderLocal, localLabel);
+            }, chartHolderLocal, localLabel, buildLocalChartDatasets);
             if ((!localPayload || !localPayload.chart) && centerValueLocal) {
                 centerValueLocal.textContent = '—';
                 if (centerLabelLocal) {

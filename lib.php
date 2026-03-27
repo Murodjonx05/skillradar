@@ -35,10 +35,12 @@ function local_skillradar_get_report_page_config(): array {
     if ($isuserreport) {
         // Match gradereport/user/index.php: userid may be absent from URL while the report uses
         // $SESSION->gradereport_user["useritem-{$context->id}"] for the selected student.
-        $useridparam = optional_param('userid', null, PARAM_INT);
-        if ($useridparam !== null && $useridparam > 0) {
+        $urlparams = $PAGE->url->params();
+        $hasuseridparam = array_key_exists('userid', $urlparams);
+        $useridparam = $hasuseridparam ? clean_param($urlparams['userid'], PARAM_INT) : null;
+        if ($hasuseridparam && $useridparam > 0) {
             $userid = (int)$useridparam;
-        } else if ($useridparam === 0) {
+        } else if ($hasuseridparam && $useridparam === 0) {
             // Teacher "all users" report mode — no single user for the radar.
             $userid = 0;
         } else {
@@ -388,6 +390,9 @@ function local_skillradar_render_grade_report_panel(): string {
         'local-skillradar-body'
     );
 
+    $bootstrapping = json_encode('Bootstrapping...');
+    $scriptmissing = json_encode('script.js not loaded');
+
     return html_writer::div(
         $heading . $help . $toolbar . $body,
         'local-skillradar-panel',
@@ -396,17 +401,24 @@ function local_skillradar_render_grade_report_panel(): string {
         "(function() {" .
         "var results = document.getElementById('local-skillradar-results');" .
         "var resultsLocal = document.getElementById('local-skillradar-results-local');" .
-        "if (results && !results.innerHTML) { results.innerHTML = '<p class=\"local-skillradar-results-empty\">Bootstrapping...</p>'; }" .
-        "if (resultsLocal && !resultsLocal.innerHTML) { resultsLocal.innerHTML = '<p class=\"local-skillradar-results-empty\">Bootstrapping...</p>'; }" .
+        "function setMessage(node, text) {" .
+        "if (!node || node.childNodes.length) { return; }" .
+        "var p = document.createElement('p');" .
+        "p.className = 'local-skillradar-results-empty';" .
+        "p.textContent = text;" .
+        "node.appendChild(p);" .
+        "}" .
+        "setMessage(results, " . $bootstrapping . ");" .
+        "setMessage(resultsLocal, " . $bootstrapping . ");" .
         "function run() {" .
         "if (window.localSkillRadarBoot) {" .
         "window.localSkillRadarBoot();" .
         "} else if (results) {" .
-        "results.innerHTML = '<p class=\"local-skillradar-results-empty\">script.js not loaded</p>';" .
+        "results.textContent = '';" .
+        "setMessage(results, " . $scriptmissing . ");" .
         "}" .
         "}" .
         "if (document.readyState === 'complete') { run(); } else { window.addEventListener('load', run, {once: true}); }" .
         "})();"
     );
 }
-
