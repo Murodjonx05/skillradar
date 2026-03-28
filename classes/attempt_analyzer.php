@@ -13,7 +13,10 @@ require_once($GLOBALS['CFG']->dirroot . '/mod/quiz/locallib.php');
  * Loads one quiz attempt and emits normalized per-slot facts.
  *
  * Weight is always quiz_slots.maxmark for the quiz/slot (never question bank default or qa.maxmark alone).
- * Skill is resolved only via {@see skill_service} from the delivered {@see question_attempts}.questionid.
+ * Skill is resolved from the delivered {@see question_attempts}.questionid. If a row exists in
+ * {@see attempt_skill_snapshot} for this attempt, that frozen mapping is used (Moodle’s attempt is unchanged;
+ * retagging questions does not rewrite past analytics). Otherwise {@see skill_service} resolves the skill and
+ * the first successful resolution is stored for later recomputes.
  */
 class attempt_analyzer {
     /** @var string[] latest-step states accepted as graded/finalized outcomes. */
@@ -30,7 +33,7 @@ class attempt_analyzer {
 
     /**
      * @param int $attemptid
-     * @return array{attempt:\stdClass, slots:array}
+     * @return array{attempt:\stdClass, slots:array, snapshot_inserts:array<int, array{questionid:int, skillid:int, skillname:string}>}
      */
     public static function extract_attempt_data(int $attemptid): array {
         global $DB;
@@ -48,14 +51,16 @@ class attempt_analyzer {
         $attempt = $DB->get_record_sql($sql, ['attemptid' => $attemptid], MUST_EXIST);
 
         if (!self::is_attempt_eligible($attempt)) {
-            return ['attempt' => $attempt, 'slots' => []];
+            return ['attempt' => $attempt, 'slots' => [], 'snapshot_inserts' => []];
         }
 
         // Authoritative slot weights from quiz structure (not question_attempt.maxmark in isolation).
         $slotweights = $DB->get_records_menu('quiz_slots', ['quizid' => $attempt->quizid], '', 'slot, maxmark');
         if (!$slotweights) {
-            return ['attempt' => $attempt, 'slots' => []];
+            return ['attempt' => $attempt, 'slots' => [], 'snapshot_inserts' => []];
         }
+
+        $frozen = attempt_skill_snapshot::get_map_for_attempt($attemptid);
 
         $dm = new \question_engine_data_mapper();
         $lateststeps = $dm->load_questions_usages_latest_steps(new \qubaid_list([(int)$attempt->uniqueid]));
@@ -69,6 +74,7 @@ class attempt_analyzer {
         $skillsbyquestion = skill_service::get_question_skills((int)$attempt->courseid, array_values($questionids));
 
         $rows = [];
+        $snapshotinserts = [];
         foreach ($lateststeps as $step) {
             $slot = (int)$step->slot;
             if (!isset($slotweights[$slot])) {
@@ -82,7 +88,20 @@ class attempt_analyzer {
                 continue;
             }
 
-            $skill = $skillsbyquestion[(int)$step->questionid] ?? null;
+            $qid = (int)$step->questionid;
+            if (isset($frozen[$qid])) {
+                $skill = $frozen[$qid];
+            } else {
+                $skill = $skillsbyquestion[$qid] ?? null;
+                if ($skill !== null) {
+                    $snapshotinserts[$qid] = [
+                        'questionid' => $qid,
+                        'skillid' => (int)$skill->skillid,
+                        'skillname' => (string)$skill->skillname,
+                    ];
+                }
+            }
+
             if ($skill === null) {
                 continue;
             }
@@ -102,7 +121,7 @@ class attempt_analyzer {
                 'courseid' => (int)$attempt->courseid,
                 'userid' => (int)$attempt->userid,
                 'slot' => $slot,
-                'questionid' => (int)$step->questionid,
+                'questionid' => $qid,
                 'skillid' => (int)$skill->skillid,
                 'skillname' => (string)$skill->skillname,
                 'fraction' => $fraction,
@@ -112,7 +131,11 @@ class attempt_analyzer {
             ];
         }
 
-        return ['attempt' => $attempt, 'slots' => $rows];
+        return [
+            'attempt' => $attempt,
+            'slots' => $rows,
+            'snapshot_inserts' => array_values($snapshotinserts),
+        ];
     }
 
     /**

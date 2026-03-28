@@ -169,5 +169,148 @@ function xmldb_local_skillradar_upgrade($oldversion) {
         upgrade_plugin_savepoint(true, 2026033149, 'local', 'skillradar');
     }
 
+    if ($oldversion < 2026033152) {
+        upgrade_plugin_savepoint(true, 2026033152, 'local', 'skillradar');
+    }
+
+    if ($oldversion < 2026033153) {
+        upgrade_plugin_savepoint(true, 2026033153, 'local', 'skillradar');
+    }
+
+    if ($oldversion < 2026033154) {
+        $table = new xmldb_table('local_skill_attempt_qskill');
+        if (!$dbman->table_exists($table)) {
+            $table->add_field('id', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, XMLDB_SEQUENCE, null);
+            $table->add_field('attemptid', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '0');
+            $table->add_field('questionid', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '0');
+            $table->add_field('skillid', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '0');
+            $table->add_field('skillname', XMLDB_TYPE_CHAR, '255', null, XMLDB_NOTNULL, null, null);
+            $table->add_field('timecreated', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '0');
+            $table->add_key('primary', XMLDB_KEY_PRIMARY, ['id']);
+            $table->add_index('attempt_question_uix', XMLDB_INDEX_UNIQUE, ['attemptid', 'questionid']);
+            $table->add_index('attemptid_ix', XMLDB_INDEX_NOTUNIQUE, ['attemptid']);
+            $dbman->create_table($table);
+        }
+        upgrade_plugin_savepoint(true, 2026033154, 'local', 'skillradar');
+    }
+
+    if ($oldversion < 2026033155) {
+        xmldb_local_skillradar_upgrade_fk_core($dbman);
+        upgrade_plugin_savepoint(true, 2026033155, 'local', 'skillradar');
+    }
+
     return true;
+}
+
+/**
+ * Remove orphan rows, then add foreign keys to core Moodle tables (course, quiz, quiz_attempts, question, user).
+ *
+ * @param \database_manager $dbman
+ * @return void
+ */
+function xmldb_local_skillradar_upgrade_fk_core($dbman): void {
+    global $DB;
+
+    // --- Orphan cleanup (required before FKs) ---
+    if ($dbman->table_exists(new xmldb_table('local_skill_attempt_result'))) {
+        $DB->execute(
+            "DELETE FROM {local_skill_attempt_result}
+              WHERE attemptid NOT IN (SELECT id FROM {quiz_attempts})"
+        );
+        $badattemptrows = $DB->get_fieldset_sql(
+            "SELECT sar.id
+               FROM {local_skill_attempt_result} sar
+               JOIN {quiz_attempts} qa ON qa.id = sar.attemptid
+               JOIN {quiz} q ON q.id = qa.quiz
+              WHERE sar.quizid <> qa.quiz OR sar.userid <> qa.userid OR sar.courseid <> q.course"
+        );
+        foreach (array_chunk($badattemptrows, 500) as $chunk) {
+            if ($chunk === []) {
+                continue;
+            }
+            list($insql, $params) = $DB->get_in_or_equal($chunk);
+            $DB->delete_records_select('local_skill_attempt_result', "id $insql", $params);
+        }
+    }
+
+    if ($dbman->table_exists(new xmldb_table('local_skill_attempt_qskill'))) {
+        $DB->execute(
+            "DELETE FROM {local_skill_attempt_qskill}
+              WHERE attemptid NOT IN (SELECT id FROM {quiz_attempts})"
+        );
+        $DB->execute(
+            "DELETE FROM {local_skill_attempt_qskill}
+              WHERE questionid NOT IN (SELECT id FROM {question})"
+        );
+    }
+
+    if ($dbman->table_exists(new xmldb_table('local_skill_user_result'))) {
+        $DB->execute(
+            "DELETE FROM {local_skill_user_result}
+              WHERE courseid NOT IN (SELECT id FROM {course})"
+        );
+        $DB->execute(
+            "DELETE FROM {local_skill_user_result}
+              WHERE quizid NOT IN (SELECT id FROM {quiz})"
+        );
+        $DB->execute(
+            "DELETE FROM {local_skill_user_result}
+              WHERE userid NOT IN (SELECT id FROM {user})"
+        );
+        $baduserrows = $DB->get_fieldset_sql(
+            "SELECT sur.id
+               FROM {local_skill_user_result} sur
+               JOIN {quiz} q ON q.id = sur.quizid
+              WHERE sur.courseid <> q.course"
+        );
+        foreach (array_chunk($baduserrows, 500) as $chunk) {
+            if ($chunk === []) {
+                continue;
+            }
+            list($insql, $params) = $DB->get_in_or_equal($chunk);
+            $DB->delete_records_select('local_skill_user_result', "id $insql", $params);
+        }
+    }
+
+    if ($dbman->table_exists(new xmldb_table('local_skillradar_qmap'))) {
+        $DB->execute(
+            "DELETE FROM {local_skillradar_qmap}
+              WHERE questionid NOT IN (SELECT id FROM {question})"
+        );
+    }
+
+    // --- Foreign keys (idempotent: ignore if already present) ---
+    $safeadd = static function (xmldb_table $table, xmldb_key $key) use ($dbman): void {
+        try {
+            $dbman->add_key($table, $key);
+        } catch (\Throwable $e) {
+            debugging('local_skillradar FK ' . $table->getName() . '/' . $key->getName() . ': ' . $e->getMessage(), DEBUG_DEVELOPER);
+        }
+    };
+
+    if ($dbman->table_exists(new xmldb_table('local_skillradar_qmap'))) {
+        $t = new xmldb_table('local_skillradar_qmap');
+        $safeadd($t, new xmldb_key('question_fk', XMLDB_KEY_FOREIGN, ['questionid'], 'question', ['id']));
+    }
+
+    if ($dbman->table_exists(new xmldb_table('local_skill_attempt_result'))) {
+        $t = new xmldb_table('local_skill_attempt_result');
+        $safeadd($t, new xmldb_key('attempt_fk', XMLDB_KEY_FOREIGN, ['attemptid'], 'quiz_attempts', ['id']));
+        $safeadd($t, new xmldb_key('quiz_fk', XMLDB_KEY_FOREIGN, ['quizid'], 'quiz', ['id']));
+        $safeadd($t, new xmldb_key('course_fk', XMLDB_KEY_FOREIGN, ['courseid'], 'course', ['id']));
+        $safeadd($t, new xmldb_key('user_fk', XMLDB_KEY_FOREIGN, ['userid'], 'user', ['id']));
+    }
+
+    if ($dbman->table_exists(new xmldb_table('local_skill_attempt_qskill'))) {
+        $t = new xmldb_table('local_skill_attempt_qskill');
+        $safeadd($t, new xmldb_key('attempt_fk', XMLDB_KEY_FOREIGN, ['attemptid'], 'quiz_attempts', ['id']));
+        $safeadd($t, new xmldb_key('question_fk', XMLDB_KEY_FOREIGN, ['questionid'], 'question', ['id']));
+    }
+
+    if ($dbman->table_exists(new xmldb_table('local_skill_user_result'))) {
+        $t = new xmldb_table('local_skill_user_result');
+        $safeadd($t, new xmldb_key('course_fk', XMLDB_KEY_FOREIGN, ['courseid'], 'course', ['id']));
+        $safeadd($t, new xmldb_key('quiz_fk', XMLDB_KEY_FOREIGN, ['quizid'], 'quiz', ['id']));
+        $safeadd($t, new xmldb_key('user_fk', XMLDB_KEY_FOREIGN, ['userid'], 'user', ['id']));
+    }
 }

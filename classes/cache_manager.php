@@ -33,13 +33,16 @@ class cache_manager {
         }
 
         try {
-            // Read-only phase: load, validate, extract slot facts, resolve skills, aggregate (no writes).
+            // Extract slot facts; skill resolution prefers frozen per-attempt snapshots when present.
             $attemptdata = attempt_analyzer::extract_attempt_data($attemptid);
             $attempt = $attemptdata['attempt'];
             $rows = skill_aggregator::aggregate_attempt($attemptdata);
 
             $transaction = $DB->start_delegated_transaction();
             try {
+                if (!empty($attemptdata['snapshot_inserts'])) {
+                    attempt_skill_snapshot::insert_new($attemptid, $attemptdata['snapshot_inserts']);
+                }
                 self::store_attempt_skills($attemptid, $rows);
                 self::update_user_skills((int)$attempt->userid, (int)$attempt->quizid);
                 $transaction->allow_commit();

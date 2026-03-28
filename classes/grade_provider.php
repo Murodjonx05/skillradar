@@ -83,8 +83,14 @@ class grade_provider {
      * @return array
      */
     private static function payload_from_detail(int $courseid, array $detail, bool $includecourseaverage, int $quizid = 0): array {
+        $detail = self::filter_ghost_tagged_axes($detail);
+        if ($detail === []) {
+            return self::empty_tagged_radar_payload($courseid, $includecourseaverage);
+        }
+
         $config = manager::get_course_config($courseid);
-        $chart = radar_helper::build_chart_meta($detail);
+        // One chart point per skills_detail row (no min-3 padding); avoids an extra axis vs Result breakdown.
+        $chart = radar_helper::build_chart_meta($detail, count($detail));
 
         $payload = [
             'skills' => radar_helper::build_skills_map($detail),
@@ -105,6 +111,22 @@ class grade_provider {
         }
 
         return $payload;
+    }
+
+    /**
+     * Drop axes for skills that are configured but have no tagged questions in scope (items=0, empty).
+     * They skew the second radar, course_average (null holes), and Chart.js paths.
+     *
+     * @param array $detail
+     * @return array
+     */
+    private static function filter_ghost_tagged_axes(array $detail): array {
+        return array_values(array_filter($detail, static function(array $r): bool {
+            if (!empty($r['empty']) && (int)($r['items'] ?? 0) < 1) {
+                return false;
+            }
+            return true;
+        }));
     }
 
     /**
@@ -225,7 +247,7 @@ class grade_provider {
             $def = $definitions[$skillid] ?? null;
             $rows[] = [
                 'key' => (string)$skillid,
-                'label' => $def ? format_string($def->displayname) : (string)$record->skillname,
+                'label' => $def ? self::axis_label_from_definition($def, $skillid) : (string)$record->skillname,
                 'color' => $def && !empty($def->color) ? $def->color : self::color_for_skill($skillid),
                 'value' => $percent,
                 'items' => (int)$record->questions_count,
@@ -271,6 +293,27 @@ class grade_provider {
         }
 
         $defbyid = self::get_definitions_by_id($courseid);
+        $neededgradeitemids = [];
+        foreach ($rows as $row) {
+            if (!empty($row['placeholder'])) {
+                continue;
+            }
+            $sid = (int)$row['key'];
+            if ($sid <= 0 || (float)($row['maxearned'] ?? 0) > 1e-6) {
+                continue;
+            }
+            $def = $defbyid[$sid] ?? null;
+            if (!$def) {
+                continue;
+            }
+            $sk = trim((string)$def->skill_key);
+            $gradeitemid = (int)($gradeitembykey[$sk] ?? 0);
+            if ($gradeitemid > 0) {
+                $neededgradeitemids[$gradeitemid] = $gradeitemid;
+            }
+        }
+        $bulkpercents = $neededgradeitemids === [] ? [] :
+            calculator::percent_for_grade_items($courseid, array_values($neededgradeitemids), $userid);
 
         foreach ($rows as $i => $row) {
             if (!empty($row['placeholder'])) {
@@ -292,7 +335,7 @@ class grade_provider {
             if ($sk === '' || empty($gradeitembykey[$sk])) {
                 continue;
             }
-            $pct = calculator::percent_for_grade_item($courseid, $gradeitembykey[$sk], $userid);
+            $pct = $bulkpercents[(int)$gradeitembykey[$sk]] ?? null;
             if ($pct === null) {
                 continue;
             }
@@ -309,36 +352,46 @@ class grade_provider {
     }
 
     /**
-     * Add skill axes for definitions tagged on course quiz questions when materialized rows are missing (0% until attempted).
+     * Ensure the local/question-based radar exposes all configured skill definitions.
+     *
+     * If a definition is already present from materialized analytics we keep that row.
+     * Otherwise we append an empty axis immediately, even before any question is tagged or attempted.
      *
      * @param int $courseid
      * @param array $rows
      * @return array
      */
     private static function merge_missing_tagged_skills_used_in_quizzes(int $courseid, array $rows): array {
+        $usage = [];
         try {
             $usage = manager::get_tagged_skill_question_counts_in_course($courseid);
         } catch (\Throwable $e) {
             debugging('local_skillradar merge_missing_tagged_skills: ' . $e->getMessage(), DEBUG_DEVELOPER);
+        }
+
+        $definitions = self::get_definitions_by_id($courseid);
+        if ($definitions === []) {
             return $rows;
         }
-        if ($usage === []) {
-            return $rows;
-        }
+
         $have = [];
         foreach ($rows as $row) {
             $have[(int)$row['key']] = true;
         }
-        foreach ($usage as $skillid => $qcount) {
+
+        foreach ($definitions as $skillid => $definition) {
             if (isset($have[$skillid])) {
+                continue;
+            }
+            if ((int)($usage[$skillid] ?? 0) < 1) {
                 continue;
             }
             $rows[] = [
                 'key' => (string)$skillid,
-                'label' => '',
-                'color' => self::color_for_skill_row($courseid, $skillid),
+                'label' => self::axis_label_from_definition($definition, $skillid),
+                'color' => !empty($definition->color) ? $definition->color : self::color_for_skill($skillid),
                 'value' => 0.0,
-                'items' => (int)$qcount,
+                'items' => (int)($usage[$skillid] ?? 0),
                 'empty' => true,
                 'placeholder' => false,
                 'earned' => 0.0,
@@ -385,7 +438,7 @@ class grade_provider {
             $def = $definitions[$skillid] ?? null;
             $rows[] = [
                 'key' => (string)$skillid,
-                'label' => $def ? format_string($def->displayname) : (string)$record->skillname,
+                'label' => $def ? self::axis_label_from_definition($def, $skillid) : (string)$record->skillname,
                 'color' => $def && !empty($def->color) ? $def->color : self::color_for_skill($skillid),
                 'value' => $percent,
                 'items' => (int)$record->questions_count,
@@ -396,7 +449,62 @@ class grade_provider {
             ];
         }
 
-        return self::finalize_tagged_skill_rows($courseid, $rows);
+        $rows = self::merge_missing_tagged_skills_for_quiz($courseid, $quizid, $rows);
+        $rows = self::finalize_tagged_skill_rows($courseid, $rows);
+        $rows = self::apply_gradebook_fallback_for_zero_weight_skills($courseid, $userid, $rows);
+
+        return $rows;
+    }
+
+    /**
+     * Append empty axes for skills tagged on this quiz but not yet present in materialized results.
+     *
+     * Mirrors course-level {@see merge_missing_tagged_skills_used_in_quizzes} but scoped to one quiz.
+     *
+     * @param int $courseid
+     * @param int $quizid
+     * @param array $rows
+     * @return array
+     */
+    private static function merge_missing_tagged_skills_for_quiz(int $courseid, int $quizid, array $rows): array {
+        $usage = [];
+        try {
+            $usage = manager::get_tagged_skill_question_counts_for_quiz($courseid, $quizid);
+        } catch (\Throwable $e) {
+            debugging('local_skillradar merge_missing_tagged_skills_for_quiz: ' . $e->getMessage(), DEBUG_DEVELOPER);
+        }
+
+        $definitions = self::get_definitions_by_id($courseid);
+        if ($definitions === []) {
+            return $rows;
+        }
+
+        $have = [];
+        foreach ($rows as $row) {
+            $have[(int)$row['key']] = true;
+        }
+
+        foreach ($definitions as $skillid => $definition) {
+            if (isset($have[$skillid])) {
+                continue;
+            }
+            if ((int)($usage[$skillid] ?? 0) < 1) {
+                continue;
+            }
+            $rows[] = [
+                'key' => (string)$skillid,
+                'label' => self::axis_label_from_definition($definition, $skillid),
+                'color' => !empty($definition->color) ? $definition->color : self::color_for_skill($skillid),
+                'value' => 0.0,
+                'items' => (int)($usage[$skillid] ?? 0),
+                'empty' => true,
+                'placeholder' => false,
+                'earned' => 0.0,
+                'maxearned' => 0.0,
+            ];
+        }
+
+        return $rows;
     }
 
     /**
@@ -416,7 +524,7 @@ class grade_provider {
         foreach ($rows as &$row) {
             $sid = (int)$row['key'];
             if ($sid > 0 && isset($defbyid[$sid])) {
-                $row['label'] = format_string($defbyid[$sid]->displayname);
+                $row['label'] = self::axis_label_from_definition($defbyid[$sid], $sid);
                 if (!empty($defbyid[$sid]->color)) {
                     $row['color'] = $defbyid[$sid]->color;
                 }
@@ -446,7 +554,13 @@ class grade_provider {
     private static function compute_overall(\stdClass $config, array $detail): array {
         $overallmode = $config->overallmode ?? 'average';
         $available = array_values(array_filter($detail, static function(array $row): bool {
-            return $row['value'] !== null;
+            if ($row['value'] === null) {
+                return false;
+            }
+            if (!empty($row['empty'])) {
+                return false;
+            }
+            return true;
         }));
 
         if (!$available) {
@@ -614,6 +728,52 @@ class grade_provider {
      * @param int $skillid
      * @return string
      */
+    /**
+     * Axis label from a course skill definition: never show a bare numeric display name that equals the row id.
+     *
+     * @param \stdClass $def local_skillradar_def row
+     * @param int $skillid Definition id (positive)
+     * @return string
+     */
+    private static function axis_label_from_definition(\stdClass $def, int $skillid): string {
+        $name = trim((string)($def->displayname ?? ''));
+        $key = trim((string)($def->skill_key ?? ''));
+        // Purely numeric display name that does not match this definition id — prefer skill_key (e.g. displayname "5", id 8).
+        if ($name !== '' && $key !== '' && preg_match('/^\d+$/', $name) === 1 && (int)$name !== $skillid) {
+            return format_string($def->skill_key);
+        }
+        if ($name !== '' && self::displayname_is_ambiguous_numeric_id($name, $skillid)) {
+            if ($key !== '') {
+                return format_string($def->skill_key);
+            }
+            return get_string('skill_label_fallback', 'local_skillradar', ['id' => $skillid]);
+        }
+        if ($name !== '') {
+            return format_string($def->displayname);
+        }
+        if ($key !== '') {
+            return format_string($def->skill_key);
+        }
+        return get_string('skill_label_fallback', 'local_skillradar', ['id' => $skillid]);
+    }
+
+    /**
+     * True when the admin entered only digits as the display name and they match the definition primary key.
+     *
+     * @param string $name
+     * @param int $skillid
+     * @return bool
+     */
+    private static function displayname_is_ambiguous_numeric_id(string $name, int $skillid): bool {
+        if ($skillid < 1) {
+            return false;
+        }
+        if (preg_match('/^\d+$/', $name) !== 1) {
+            return false;
+        }
+        return (int)$name === $skillid;
+    }
+
     private static function color_for_skill(int $skillid): string {
         $palette = ['#2563EB', '#059669', '#DC2626', '#D97706', '#7C3AED', '#0891B2'];
         $idx = abs($skillid) % count($palette);

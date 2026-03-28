@@ -25,6 +25,21 @@ class calculator {
     private static $bulkpercentcache = [];
     /** @var array<string, array<int, array{0: float, 1: float}|null>> */
     private static $rangebatchcache = [];
+    /** @var array<string, array<int, \stdClass>> */
+    private static $gradegradesamplecache = [];
+
+    /**
+     * Clear process-local caches used by grade item lookups and bulk calculations.
+     *
+     * @return void
+     */
+    public static function reset_caches(): void {
+        self::$gradeitemcache = [];
+        self::$gradegradecache = [];
+        self::$bulkpercentcache = [];
+        self::$rangebatchcache = [];
+        self::$gradegradesamplecache = [];
+    }
 
     /**
      * Max points from activity settings (e.g. quiz grade), not only grade_item row.
@@ -254,7 +269,6 @@ class calculator {
     }
 
     public static function build_mapping_meta(int $courseid, array $definitions, array $mappings): array {
-        global $DB;
         $defbykey = [];
         foreach ($definitions as $definition) {
             $defbykey[$definition->skill_key] = $definition;
@@ -269,6 +283,7 @@ class calculator {
             }
         }
         $gradeitems = self::get_grade_items_by_ids($courseid, array_values($gradeitemids));
+        $samples = self::get_latest_grade_scale_samples(array_keys($gradeitems));
         foreach ($mappings as $mapping) {
             $sk = trim((string) $mapping->skill_key);
             if ($sk === '' || $sk === '_none') {
@@ -301,15 +316,7 @@ class calculator {
                 $gmin = $activityrange[0];
                 $gmax = $activityrange[1];
             } else {
-                $sample = $DB->get_record_sql(
-                    "SELECT rawgrademin, rawgrademax
-                       FROM {grade_grades}
-                      WHERE itemid = ?
-                        AND rawgrademax > rawgrademin
-                   ORDER BY timemodified DESC
-                      LIMIT 1",
-                    [$mapping->gradeitemid]
-                );
+                $sample = $samples[(int)$mapping->gradeitemid] ?? null;
                 $gmin = (float) $gi->grademin;
                 $gmax = (float) $gi->grademax;
                 if ($sample) {
@@ -401,6 +408,7 @@ class calculator {
         }
 
         $weightsbyskill = [];
+        $skillweightsbyitem = [];
         $gradeitemids = [];
         foreach ($mappings as $mapping) {
             $skillkey = trim((string)$mapping->skill_key);
@@ -410,6 +418,7 @@ class calculator {
                 continue;
             }
             $weightsbyskill[$skillkey][$gradeitemid] = $weight;
+            $skillweightsbyitem[$gradeitemid][$skillkey] = $weight;
             $gradeitemids[$gradeitemid] = true;
         }
         if ($weightsbyskill === [] || $gradeitemids === []) {
@@ -455,11 +464,7 @@ class calculator {
             if ($percent === null) {
                 continue;
             }
-            foreach ($weightsbyskill as $skillkey => $itemweights) {
-                if (!isset($itemweights[$itemid])) {
-                    continue;
-                }
-                $weight = (float)$itemweights[$itemid];
+            foreach ($skillweightsbyitem[$itemid] ?? [] as $skillkey => $weight) {
                 if (!isset($totals[$skillkey][$userid])) {
                     $totals[$skillkey][$userid] = ['weighted' => 0.0, 'weightsum' => 0.0];
                 }
@@ -741,5 +746,58 @@ class calculator {
             return null;
         }
         return round(array_sum($samples) / count($samples), 2);
+    }
+
+    /**
+     * @param int[] $gradeitemids
+     * @return array<int, \stdClass>
+     */
+    private static function get_latest_grade_scale_samples(array $gradeitemids): array {
+        global $DB;
+
+        $gradeitemids = array_values(array_unique(array_filter(array_map('intval', $gradeitemids))));
+        if ($gradeitemids === []) {
+            return [];
+        }
+
+        sort($gradeitemids);
+        $cachekey = implode(',', $gradeitemids);
+        if (isset(self::$gradegradesamplecache[$cachekey])) {
+            return self::$gradegradesamplecache[$cachekey];
+        }
+
+        [$subinsql, $subparams] = $DB->get_in_or_equal($gradeitemids, SQL_PARAMS_NAMED, 'ggssub');
+        [$outerinsql, $outerparams] = $DB->get_in_or_equal($gradeitemids, SQL_PARAMS_NAMED, 'ggsout');
+        $records = $DB->get_records_sql(
+            "SELECT gg.itemid,
+                    gg.rawgrademin,
+                    gg.rawgrademax,
+                    gg.timemodified
+               FROM {grade_grades} gg
+               JOIN (
+                    SELECT itemid, MAX(timemodified) AS maxtimemodified
+                      FROM {grade_grades}
+                     WHERE itemid {$subinsql}
+                       AND rawgrademax > rawgrademin
+                  GROUP BY itemid
+               ) latest
+                 ON latest.itemid = gg.itemid
+                AND latest.maxtimemodified = gg.timemodified
+              WHERE gg.itemid {$outerinsql}
+                AND gg.rawgrademax > gg.rawgrademin
+           ORDER BY gg.itemid ASC",
+            array_merge($subparams, $outerparams)
+        );
+
+        $samples = [];
+        foreach ($records as $record) {
+            $itemid = (int)$record->itemid;
+            if (!isset($samples[$itemid])) {
+                $samples[$itemid] = $record;
+            }
+        }
+        self::$gradegradesamplecache[$cachekey] = $samples;
+
+        return $samples;
     }
 }

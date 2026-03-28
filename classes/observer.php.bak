@@ -36,14 +36,6 @@ class observer {
         self::recompute_attempt((int)$event->objectid);
     }
 
-    /**
-     * Fired when mod_quiz notifies that manual grading is complete (e.g. cron after all essays marked).
-     * Complements {@see question_manually_graded} which fires per question from the grading UI.
-     */
-    public static function attempt_manual_grading_completed(\mod_quiz\event\attempt_manual_grading_completed $event): void {
-        self::recompute_attempt((int)$event->objectid);
-    }
-
     public static function question_manually_graded(\mod_quiz\event\question_manually_graded $event): void {
         $attemptid = 0;
         if (!empty($event->other) && array_key_exists('attemptid', $event->other)) {
@@ -53,18 +45,18 @@ class observer {
     }
 
     /**
-     * Rebuild course analytics when Moodle quiz settings change.
+     * Rebuild course analytics when Moodle quiz module settings change (e.g. grade method).
      *
-     * The second radar is sourced from materialized quiz-attempt analytics. If the quiz grading method
-     * changes (highest / average / first / last), previously materialized local_skill_user_result rows
-     * become stale until the course is recomputed.
+     * Slot/question/max-mark changes dispatch {@see \mod_quiz\hook\structure_modified} via
+     * {@see \local_skillradar\hook_callbacks::quiz_structure_modified}; this observer covers
+     * settings-only updates that still fire as course_module_updated.
      */
     public static function course_module_updated(\core\event\course_module_updated $event): void {
         if (empty($event->courseid) || empty($event->contextinstanceid)) {
             return;
         }
 
-        if (empty($event->other) || !is_array($event->other) || ($event->other['modulename'] ?? '') !== 'quiz') {
+        if (($event->other['modulename'] ?? '') !== 'quiz') {
             return;
         }
 
@@ -90,12 +82,7 @@ class observer {
             return;
         }
 
-        try {
-            cache_manager::recompute_attempt($attemptid);
-        } catch (\Throwable $e) {
-            debugging('local_skillradar recompute_attempt failed for attempt ' . $attemptid . ': ' . $e->getMessage(),
-                DEBUG_DEVELOPER, $e);
-        }
+        cache_manager::recompute_attempt($attemptid);
     }
 
     public static function question_created(\core\event\question_created $event): void {

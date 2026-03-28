@@ -25,8 +25,16 @@ $observers = [
         'callback' => '\local_skillradar\observer::attempt_regraded',
     ],
     [
+        'eventname' => '\mod_quiz\event\attempt_manual_grading_completed',
+        'callback' => '\local_skillradar\observer::attempt_manual_grading_completed',
+    ],
+    [
         'eventname' => '\mod_quiz\event\question_manually_graded',
         'callback' => '\local_skillradar\observer::question_manually_graded',
+    ],
+    [
+        'eventname' => '\core\event\course_module_updated',
+        'callback' => '\local_skillradar\observer::course_module_updated',
     ],
     [
         'eventname' => '\core\event\question_created',

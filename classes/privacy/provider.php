@@ -18,6 +18,10 @@ class provider implements \core_privacy\local\metadata\provider {
             'userid' => 'privacy:metadata:local_skill_attempt_result:userid',
         ], 'privacy:metadata:local_skill_attempt_result');
 
+        $collection->add_database_table('local_skill_attempt_qskill', [
+            'attemptid' => 'privacy:metadata:local_skill_attempt_qskill:attemptid',
+        ], 'privacy:metadata:local_skill_attempt_qskill');
+
         $collection->add_database_table('local_skill_user_result', [
             'userid' => 'privacy:metadata:local_skill_user_result:userid',
         ], 'privacy:metadata:local_skill_user_result');

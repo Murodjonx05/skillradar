@@ -127,7 +127,7 @@
     }
 
     /**
-     * API course_average.values align to skills_detail only; chart.labels can be longer (min-axes placeholders).
+     * API course_average.values align to non-placeholder chart axes (same order as skills_detail rows in payload).
      * Chart.js requires every dataset data[] length to match labels[].
      *
      * @param {{chart?: object, course_average?: object}} payload
@@ -183,8 +183,15 @@
                 (((payload && payload.strings && payload.strings.noResults) || 'No data.')) + '</p>';
             return;
         }
+        // Second radar: omit min-axis placeholders only. Keep rows with empty=true but items>=1 (0% until attempt data).
         var rows = (payload.skills_detail || []).filter(function(item) {
-            return !item.placeholder;
+            if (item.placeholder) {
+                return false;
+            }
+            if (item.empty && (!item.items || Number(item.items) < 1)) {
+                return false;
+            }
+            return true;
         });
         var hasRealValues = rows.some(function(row) {
             return row.value !== null;

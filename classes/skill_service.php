@@ -25,6 +25,134 @@ class skill_service {
     private static $questionqtypecache = [];
 
     /**
+     * Clear in-request skill resolution caches (e.g. after qmap / definitions change).
+     */
+    public static function reset_caches(): void {
+        self::$questionskillcache = [];
+        self::$questioncontextcache = [];
+        self::$questionqtypecache = [];
+    }
+
+    /**
+     * Load question rows with bank category id, category name, context, and qtype.
+     *
+     * Modern Moodle stores category on {@see question_bank_entries}; legacy installs had {@see question}.category.
+     *
+     * @param int[] $questionids
+     * @return array<int, \stdClass> Keyed by question id (questionid property matches key).
+     */
+    private static function load_question_bank_category_records(array $questionids): array {
+        global $DB;
+
+        if ($questionids === []) {
+            return [];
+        }
+
+        [$insql, $params] = $DB->get_in_or_equal($questionids, SQL_PARAMS_NAMED, 'qq');
+        $manager = $DB->get_manager();
+        $hasversions = $manager->table_exists(new \xmldb_table('question_versions'));
+        $hasentries = $manager->table_exists(new \xmldb_table('question_bank_entries'));
+
+        if ($hasversions && $hasentries) {
+            $ready = \core_question\local\bank\question_version_status::QUESTION_STATUS_READY;
+            $params['qvsready'] = $ready;
+            $params['qvsready2'] = $ready;
+
+            return $DB->get_records_sql(
+                "SELECT q.id AS questionid,
+                        qbe.id AS entryid,
+                        qbe.questioncategoryid AS catid,
+                        qc.name AS skillname,
+                        qc.contextid AS contextid,
+                        q.qtype
+                   FROM {question} q
+                   JOIN (
+                     SELECT questionid, MAX(version) AS maxver
+                       FROM {question_versions}
+                      WHERE status = :qvsready
+                   GROUP BY questionid
+                   ) qvn ON qvn.questionid = q.id
+                   JOIN {question_versions} qv ON qv.questionid = q.id AND qv.version = qvn.maxver AND qv.status = :qvsready2
+                   JOIN {question_bank_entries} qbe ON qbe.id = qv.questionbankentryid
+                   JOIN {question_categories} qc ON qc.id = qbe.questioncategoryid
+                  WHERE q.id {$insql}",
+                $params
+            );
+        }
+
+        $columns = $DB->get_columns('question');
+        if (isset($columns['category'])) {
+            return $DB->get_records_sql(
+                "SELECT q.id AS questionid,
+                        0 AS entryid,
+                        q.category AS catid,
+                        qc.name AS skillname,
+                        qc.contextid AS contextid,
+                        q.qtype
+                   FROM {question} q
+                   JOIN {question_categories} qc ON qc.id = q.category
+                  WHERE q.id {$insql}",
+                $params
+            );
+        }
+
+        return [];
+    }
+
+    /**
+     * Resolve per-course overrides by question bank entry for delivered questions from older/newer versions.
+     *
+     * This lets one mapping on the current question version apply to attempts that reference another version
+     * of the same question bank entry.
+     *
+     * @param int $courseid
+     * @param int[] $entryids
+     * @return array<int, string> questionbankentryid => skill_key
+     */
+    private static function get_override_keys_by_entry(int $courseid, array $entryids): array {
+        global $DB;
+
+        $entryids = array_values(array_unique(array_filter(array_map('intval', $entryids))));
+        if ($courseid < 1 || $entryids === []) {
+            return [];
+        }
+
+        $manager = $DB->get_manager();
+        if (!$manager->table_exists(new \xmldb_table('question_versions')) ||
+                !$manager->table_exists(new \xmldb_table('question_bank_entries'))) {
+            return [];
+        }
+
+        [$insql, $params] = $DB->get_in_or_equal($entryids, SQL_PARAMS_NAMED, 'qbe');
+        $params['courseid'] = $courseid;
+        $params['ready'] = \core_question\local\bank\question_version_status::QUESTION_STATUS_READY;
+
+        $rows = $DB->get_records_sql(
+            "SELECT qv.questionbankentryid AS entryid,
+                    m.skill_key,
+                    qv.version,
+                    qv.questionid
+               FROM {" . manager::TABLE_QMAP . "} m
+               JOIN {question_versions} qv ON qv.questionid = m.questionid
+              WHERE m.courseid = :courseid
+                AND qv.status = :ready
+                AND qv.questionbankentryid {$insql}
+           ORDER BY qv.questionbankentryid ASC, qv.version DESC, qv.questionid DESC",
+            $params
+        );
+
+        $out = [];
+        foreach ($rows as $row) {
+            $entryid = (int)$row->entryid;
+            if ($entryid < 1 || isset($out[$entryid])) {
+                continue;
+            }
+            $out[$entryid] = (string)$row->skill_key;
+        }
+        return $out;
+    }
+
+    /**
      * Resolve a delivered question to a skill snapshot for materialized analytics.
      *
      * @param int $questionid Delivered question id from the attempt.
@@ -84,18 +212,15 @@ class skill_service {
                 }
             }
 
-            [$insql, $params] = $DB->get_in_or_equal($missing, SQL_PARAMS_NAMED, 'qq');
-            $records = $DB->get_records_sql(
-                "SELECT q.id AS questionid,
-                        q.category AS catid,
-                        qc.name AS skillname,
-                        qc.contextid AS contextid,
-                        q.qtype
-                   FROM {question} q
-                   JOIN {question_categories} qc ON qc.id = q.category
-                  WHERE q.id {$insql}",
-                $params
-            );
+            $records = self::load_question_bank_category_records($missing);
+            $entryids = [];
+            foreach ($records as $record) {
+                $entryid = (int)($record->entryid ?? 0);
+                if ($entryid > 0) {
+                    $entryids[$entryid] = $entryid;
+                }
+            }
+            $overridebyentry = self::get_override_keys_by_entry($courseid, array_values($entryids));
 
             foreach ($missing as $questionid) {
                 $record = $records[$questionid] ?? null;
@@ -105,6 +230,9 @@ class skill_service {
                 }
 
                 $overridekey = $overridebyquestion[$questionid] ?? '';
+                if ($overridekey === '' && $record) {
+                    $overridekey = $overridebyentry[(int)($record->entryid ?? 0)] ?? '';
+                }
                 if ($overridekey !== '' && isset($defsbykey[$overridekey])) {
                     $def = $defsbykey[$overridekey];
                     self::$questionskillcache[$courseid][$questionid] = (object)[

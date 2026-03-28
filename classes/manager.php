@@ -20,7 +20,7 @@ class manager {
     /** @var string Application cache key prefix for per-course payload revision. */
     private const CACHE_REV_PREFIX = 'skillradar_rev_';
     /** @var int Bump when payload structure or aggregation logic changes and cached JSON must be rebuilt. */
-    private const CACHE_FORMAT_VERSION = 2;
+    private const CACHE_FORMAT_VERSION = 3;
     /** @var null|bool */
     private static $qmaptableexists = null;
     /** @var array<int, array<int, int>> */
@@ -352,6 +352,91 @@ class manager {
     }
 
     /**
+     * Non-random questions in one quiz (same shape as {@see get_course_quiz_questions} records).
+     *
+     * @param int $courseid
+     * @param int $quizid
+     * @return array<int, \stdClass> questionid => {questionid, name, qtype}
+     */
+    private static function get_quiz_questions(int $courseid, int $quizid): array {
+        global $DB;
+
+        if ($courseid < 1 || $quizid < 1) {
+            return [];
+        }
+
+        $quiz = $DB->get_record('quiz', ['id' => $quizid, 'course' => $courseid], 'id,course', IGNORE_MISSING);
+        if (!$quiz) {
+            return [];
+        }
+
+        $cm = get_coursemodule_from_instance('quiz', $quizid, $courseid, false, IGNORE_MISSING);
+        if (!$cm) {
+            return [];
+        }
+
+        if (!class_exists(\mod_quiz\question\bank\qbank_helper::class)) {
+            return self::get_quiz_questions_legacy($quizid);
+        }
+
+        $questionids = [];
+        $context = \context_module::instance($cm->id);
+        try {
+            $structure = \mod_quiz\question\bank\qbank_helper::get_question_structure((int)$quiz->id, $context, null);
+        } catch (\Throwable $e) {
+            debugging('local_skillradar get_quiz_questions quiz ' . (int)$quiz->id . ': ' . $e->getMessage(), DEBUG_DEVELOPER);
+            return [];
+        }
+        foreach ($structure as $slotdata) {
+            $qid = $slotdata->questionid ?? null;
+            if ($qid === null || !is_numeric($qid) || (int)$qid < 1) {
+                continue;
+            }
+            if (($slotdata->qtype ?? '') === 'random') {
+                continue;
+            }
+            $questionids[(int)$qid] = true;
+        }
+
+        if ($questionids === []) {
+            return [];
+        }
+
+        [$insql, $params] = $DB->get_in_or_equal(array_keys($questionids), SQL_PARAMS_NAMED);
+        $sql = "SELECT q.id AS questionid, q.name, q.qtype
+                  FROM {question} q
+                 WHERE q.id $insql
+              ORDER BY q.name ASC, q.id ASC";
+
+        return $DB->get_records_sql($sql, $params);
+    }
+
+    /**
+     * Single-quiz variant of {@see get_course_quiz_questions_legacy}.
+     *
+     * @param int $quizid
+     * @return array<int, \stdClass>
+     */
+    private static function get_quiz_questions_legacy(int $quizid): array {
+        global $DB;
+
+        $columns = $DB->get_columns('quiz_slots');
+        if (!isset($columns['questionid'])) {
+            return [];
+        }
+
+        $sql = "SELECT DISTINCT qs.questionid,
+                       q.name,
+                       q.qtype
+                  FROM {quiz_slots} qs
+                  JOIN {question} q ON q.id = qs.questionid
+                 WHERE qs.quizid = :quizid
+              ORDER BY q.name ASC, qs.questionid ASC";
+
+        return $DB->get_records_sql($sql, ['quizid' => $quizid]);
+    }
+
+    /**
      * Counts how many non-random quiz questions in the course resolve to each course skill definition (positive skillid only).
      * Used to show axes for tagged skills that have no materialized learner row yet.
      *
@@ -385,6 +470,38 @@ class manager {
             $counts[$sid]++;
         }
         self::$taggedskillquestioncountcache[$courseid] = $counts;
+        return $counts;
+    }
+
+    /**
+     * Per-quiz tagged skill counts (skills whose questions appear in this quiz's structure).
+     *
+     * @param int $courseid
+     * @param int $quizid
+     * @return array<int, int> definition id => question count
+     */
+    public static function get_tagged_skill_question_counts_for_quiz(int $courseid, int $quizid): array {
+        $questions = self::get_quiz_questions($courseid, $quizid);
+        if ($questions === []) {
+            return [];
+        }
+        $counts = [];
+        $questionids = [];
+        foreach ($questions as $q) {
+            $questionids[] = (int)$q->questionid;
+        }
+        $skills = skill_service::get_question_skills($courseid, $questionids);
+        foreach ($questions as $q) {
+            $skill = $skills[(int)$q->questionid] ?? null;
+            if (!$skill || (int)$skill->skillid <= 0) {
+                continue;
+            }
+            $sid = (int)$skill->skillid;
+            if (!isset($counts[$sid])) {
+                $counts[$sid] = 0;
+            }
+            $counts[$sid]++;
+        }
         return $counts;
     }
 
@@ -449,20 +566,29 @@ class manager {
             $valid[$def->skill_key] = true;
         }
 
+        $upserts = [];
         foreach ($rows as $row) {
             $qid = (int)$row['questionid'];
             if ($qid < 1) {
                 continue;
             }
-            $DB->delete_records(self::TABLE_QMAP, ['courseid' => $courseid, 'questionid' => $qid]);
-            $sk = trim((string)($row['skill_key'] ?? ''));
-            if ($sk === '' || $sk === '_none') {
+            $upserts[$qid] = trim((string)($row['skill_key'] ?? ''));
+        }
+        if ($upserts === []) {
+            return;
+        }
+
+        [$insql, $params] = $DB->get_in_or_equal(array_keys($upserts), SQL_PARAMS_NAMED, 'qmapqid');
+        $params['courseid'] = $courseid;
+
+        $transaction = $DB->start_delegated_transaction();
+        $DB->delete_records_select(self::TABLE_QMAP, "courseid = :courseid AND questionid {$insql}", $params);
+
+        $now = time();
+        foreach ($upserts as $qid => $sk) {
+            if ($sk === '' || $sk === '_none' || empty($valid[$sk])) {
                 continue;
             }
-            if (empty($valid[$sk])) {
-                continue;
-            }
-            $now = time();
             $DB->insert_record(self::TABLE_QMAP, (object)[
                 'courseid' => $courseid,
                 'questionid' => $qid,
@@ -471,7 +597,9 @@ class manager {
                 'timemodified' => $now,
             ]);
         }
+        $transaction->allow_commit();
         self::invalidate_course_cache($courseid);
+        self::reset_static_caches();
     }
 
     /**
@@ -483,6 +611,8 @@ class manager {
         self::$qmaptableexists = null;
         self::$taggedskillquestioncountcache = [];
         self::$definitionscache = [];
+        calculator::reset_caches();
+        skill_service::reset_caches();
     }
 
     /**
@@ -539,10 +669,16 @@ class manager {
         if ($courseid < 1) {
             return;
         }
+        foreach (\core\task\manager::get_adhoc_tasks(\local_skillradar\task\rebuild_course_analytics::class) as $task) {
+            $data = (array)$task->get_custom_data();
+            if ((int)($data['courseid'] ?? 0) === $courseid) {
+                return;
+            }
+        }
         $task = new \local_skillradar\task\rebuild_course_analytics();
         $task->set_component('local_skillradar');
         $task->set_custom_data(['courseid' => $courseid]);
-        \core\task\manager::queue_adhoc_task($task, true);
+        \core\task\manager::queue_adhoc_task($task);
     }
 
     /**

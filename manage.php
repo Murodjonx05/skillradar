@@ -55,6 +55,7 @@ if (data_submitted() && confirm_sesskey()) {
                 'timemodified' => time(),
             ]);
             \local_skillradar\manager::invalidate_course_cache($courseid);
+            \local_skillradar\manager::queue_course_rebuild($courseid);
         }
     } else if ($action === 'deleteskill') {
         $defid = optional_param('defid', 0, PARAM_INT);
@@ -65,8 +66,8 @@ if (data_submitted() && confirm_sesskey()) {
             if (\local_skillradar\manager::qmap_table_exists()) {
                 $DB->delete_records(\local_skillradar\manager::TABLE_QMAP, ['courseid' => $courseid, 'skill_key' => $def->skill_key]);
             }
-            \local_skillradar\manager::rebuild_course_quiz_attempts($courseid);
             \local_skillradar\manager::invalidate_course_cache($courseid);
+            \local_skillradar\manager::queue_course_rebuild($courseid);
         }
     } else if ($action === 'saveconfig') {
         $config = \local_skillradar\manager::get_course_config($courseid);
