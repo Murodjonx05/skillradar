@@ -165,6 +165,44 @@ final class course_skill_flow_test extends \advanced_testcase {
     }
 
     /**
+     * Grading method «highest»: when total grades tie, the later best attempt should win.
+     */
+    public function test_quiz_grademethod_highest_attempt_prefers_later_tied_attempt(): void {
+        global $DB;
+
+        $this->resetAfterTest(true);
+        manager::reset_static_caches();
+        skill_service::reset_caches();
+
+        $ctx = $this->create_course_with_two_skills_one_quiz();
+        $student = $ctx['student'];
+        $course = $ctx['course'];
+        $quiz = $ctx['quiz'];
+        $q1 = $ctx['q1'];
+        $q2 = $ctx['q2'];
+
+        $DB->set_field('quiz', 'grademethod', (string)QUIZ_GRADEHIGHEST, ['id' => $quiz->id]);
+
+        $aid1 = $this->finish_attempt_answer_slots($quiz, $student, [
+            1 => $this->correct_answer_for_question($q1->id),
+            2 => $this->wrong_answer_for_numerical($q2->id),
+        ]);
+        cache_manager::recompute_attempt($aid1);
+
+        $aid2 = $this->finish_attempt_answer_slots($quiz, $student, [
+            1 => $this->wrong_answer_for_numerical($q1->id),
+            2 => $this->correct_answer_for_question($q2->id),
+        ]);
+        cache_manager::recompute_attempt($aid2);
+
+        $payload = grade_provider::get_quiz_skill_radar((int)$student->id, (int)$course->id, (int)$quiz->id, false);
+        $bykey = $this->index_detail_by_skill_key($payload['skills_detail'] ?? []);
+
+        $this->assertEqualsWithDelta(0.0, (float)$bykey['alpha']['value'], 0.05);
+        $this->assertEqualsWithDelta(100.0, (float)$bykey['beta']['value'], 0.05);
+    }
+
+    /**
      * Replace question→skill mapping before any attempt: materialized skill follows new mapping.
      */
     public function test_replace_question_skill_mapping_before_attempt_uses_new_skill(): void {
