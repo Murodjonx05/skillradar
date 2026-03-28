@@ -88,6 +88,7 @@ $string['chartdebug_overall'] = 'overall';
 $string['chartdebug_selected_quiz'] = 'selected_quizid (API)';
 $string['chartdebug_chartjs'] = 'Chart.js instance (datasets after render)';
 $string['chartdebug_no_payload'] = 'No payload (null or missing).';
+$string['debug_no_skills'] = 'No skills to display.';
 $string['singleradar_noanalytics'] = 'No quiz analytics for this test yet. The left chart needs materialized data from finished quiz attempts (question-level skills). The course chart may still show values from gradebook skill mappings. Complete a graded attempt in this quiz, or run «Rebuild analytics» from Site administration if data should already exist.';
 $string['radar_tagged_skills_empty'] = 'No skill radar data for defined skill keys yet. Assign a «Skill Radar» key to each question you use in a quiz (course skill definitions), then complete a graded attempt. Axes show skill names from your definitions, not raw keys. Categories alone (without a key) are not shown on this chart.';
 $string['radar_global_gradebook_empty'] = 'The global chart uses «Grade item mapping» (Moodle gradebook: quiz totals, etc.). Add skill definitions and map grade items here — it does not use the same data as the local question chart below.';

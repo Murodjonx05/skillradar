@@ -9,7 +9,6 @@ defined('MOODLE_INTERNAL') || die();
  * Builds UI payloads from materialized tables; local radar may fill gaps from gradebook mappings.
  */
 class grade_provider {
-    private const MIN_AXES = 3;
 
     /**
      * Build radar payload from materialized rows; may fill zero-weight skills from gradebook mappings.
@@ -85,10 +84,10 @@ class grade_provider {
      */
     private static function payload_from_detail(int $courseid, array $detail, bool $includecourseaverage, int $quizid = 0): array {
         $config = manager::get_course_config($courseid);
-        $chart = self::build_chart_meta($detail);
+        $chart = radar_helper::build_chart_meta($detail);
 
         $payload = [
-            'skills' => self::build_skills_map($detail),
+            'skills' => radar_helper::build_skills_map($detail),
             'skills_detail' => $detail,
             'mapping_meta' => [],
             'chart' => $chart,
@@ -217,14 +216,17 @@ class grade_provider {
             'userid' => $userid,
             'strategy' => cache_manager::STRATEGY_LATEST,
         ]);
+        $definitions = self::get_definitions_by_id($courseid);
 
         $rows = [];
         foreach ($records as $record) {
             $percent = skill_aggregator::compute_percent((float)$record->earned, (float)$record->maxearned);
+            $skillid = (int)$record->skillid;
+            $def = $definitions[$skillid] ?? null;
             $rows[] = [
-                'key' => (string)$record->skillid,
-                'label' => (string)$record->skillname,
-                'color' => self::color_for_skill_row($courseid, (int)$record->skillid),
+                'key' => (string)$skillid,
+                'label' => $def ? format_string($def->displayname) : (string)$record->skillname,
+                'color' => $def && !empty($def->color) ? $def->color : self::color_for_skill($skillid),
                 'value' => $percent,
                 'items' => (int)$record->questions_count,
                 'empty' => false,
@@ -268,10 +270,7 @@ class grade_provider {
             return $rows;
         }
 
-        $defbyid = [];
-        foreach (manager::get_definitions($courseid) as $d) {
-            $defbyid[(int)$d->id] = $d;
-        }
+        $defbyid = self::get_definitions_by_id($courseid);
 
         foreach ($rows as $i => $row) {
             if (!empty($row['placeholder'])) {
@@ -377,14 +376,17 @@ class grade_provider {
             'quizid' => $quizid,
             'strategy' => cache_manager::STRATEGY_LATEST,
         ]);
+        $definitions = self::get_definitions_by_id($courseid);
 
         $rows = [];
         foreach ($records as $record) {
             $percent = skill_aggregator::compute_percent((float)$record->earned, (float)$record->maxearned);
+            $skillid = (int)$record->skillid;
+            $def = $definitions[$skillid] ?? null;
             $rows[] = [
-                'key' => (string)$record->skillid,
-                'label' => (string)$record->skillname,
-                'color' => self::color_for_skill_row($courseid, (int)$record->skillid),
+                'key' => (string)$skillid,
+                'label' => $def ? format_string($def->displayname) : (string)$record->skillname,
+                'color' => $def && !empty($def->color) ? $def->color : self::color_for_skill($skillid),
                 'value' => $percent,
                 'items' => (int)$record->questions_count,
                 'empty' => false,
@@ -409,10 +411,7 @@ class grade_provider {
             return [];
         }
 
-        $defbyid = [];
-        foreach (manager::get_definitions($courseid) as $def) {
-            $defbyid[(int)$def->id] = $def;
-        }
+        $defbyid = self::get_definitions_by_id($courseid);
 
         foreach ($rows as &$row) {
             $sid = (int)$row['key'];
@@ -436,88 +435,7 @@ class grade_provider {
             return strcmp((string)$a['label'], (string)$b['label']);
         });
 
-        return self::dedupe_duplicate_axis_labels($rows);
-    }
-
-    /**
-     * @param array $rows
-     * @return array
-     */
-    private static function dedupe_duplicate_axis_labels(array $rows): array {
-        $labels = [];
-        foreach ($rows as $row) {
-            if (!empty($row['placeholder'])) {
-                continue;
-            }
-            $labels[] = trim((string)($row['label'] ?? ''));
-        }
-        $counts = array_count_values($labels);
-        foreach ($rows as &$row) {
-            if (!empty($row['placeholder'])) {
-                continue;
-            }
-            $lab = trim((string)($row['label'] ?? ''));
-            if (($counts[$lab] ?? 0) > 1) {
-                $k = trim((string)($row['key'] ?? ''));
-                $row['label'] = $lab . ' · ' . ($k !== '' ? $k : '?');
-            }
-        }
-        unset($row);
-
-        return $rows;
-    }
-
-    /**
-     * @param array $detail
-     * @return array
-     */
-    private static function build_skills_map(array $detail): array {
-        $skills = [];
-        foreach ($detail as $row) {
-            if ($row['placeholder']) {
-                continue;
-            }
-            $skills[$row['label']] = $row['value'] === null ? 0.0 : (float)$row['value'];
-        }
-        return $skills;
-    }
-
-    /**
-     * @param array $detail
-     * @return array
-     */
-    private static function build_chart_meta(array $detail): array {
-        $labels = [];
-        $values = [];
-        $colors = [];
-        $placeholders = [];
-        $keys = [];
-
-        foreach ($detail as $row) {
-            $labels[] = $row['label'];
-            $values[] = $row['value'];
-            $colors[] = $row['color'];
-            $placeholders[] = false;
-            $keys[] = $row['key'];
-        }
-
-        $i = 0;
-        while (count($labels) < self::MIN_AXES) {
-            $labels[] = get_string('notconfigured', 'local_skillradar');
-            $values[] = null;
-            $colors[] = '#CBD5E1';
-            $placeholders[] = true;
-            $keys[] = '_placeholder_' . $i;
-            $i++;
-        }
-
-        return [
-            'labels' => $labels,
-            'values' => $values,
-            'colors' => $colors,
-            'placeholder' => $placeholders,
-            'keys' => $keys,
-        ];
+        return radar_helper::dedupe_duplicate_axis_labels($rows);
     }
 
     /**
@@ -550,7 +468,7 @@ class grade_provider {
             $percent = round($sum / count($available), 2);
         }
 
-        return ['percent' => $percent, 'letter' => self::percent_to_letter($percent)];
+        return ['percent' => $percent, 'letter' => radar_helper::percent_to_letter($percent)];
     }
 
     /**
@@ -631,27 +549,7 @@ class grade_provider {
     private static function average_percent_for_grade_item(int $courseid, int $gradeitemid): ?float {
         global $DB;
 
-        $userids = $DB->get_fieldset_sql(
-            "SELECT DISTINCT userid
-               FROM {grade_grades}
-              WHERE itemid = ?",
-            [$gradeitemid]
-        );
-        if (!$userids) {
-            return null;
-        }
-        $samples = [];
-        foreach ($userids as $uid) {
-            $p = calculator::percent_for_grade_item($courseid, $gradeitemid, (int)$uid);
-            if ($p !== null) {
-                $samples[] = $p;
-            }
-        }
-        if ($samples === []) {
-            return null;
-        }
-
-        return round(array_sum($samples) / count($samples), 2);
+        return calculator::average_percent_for_grade_item_bulk($courseid, $gradeitemid);
     }
 
     /**
@@ -680,10 +578,7 @@ class grade_provider {
             return $courseavg;
         }
 
-        $defbyid = [];
-        foreach (manager::get_definitions($courseid) as $d) {
-            $defbyid[(int)$d->id] = $d;
-        }
+        $defbyid = self::get_definitions_by_id($courseid);
 
         $values = $courseavg['values'];
         foreach ($detail as $i => $row) {
@@ -716,26 +611,6 @@ class grade_provider {
     }
 
     /**
-     * Colour for a materialized axis: course skill definition when skillid matches def.id, else palette by id.
-     *
-     * @param int $courseid
-     * @param int $skillid Positive = local_skillradar_def.id; negative = question category id.
-     * @return string
-     */
-    private static function color_for_skill_row(int $courseid, int $skillid): string {
-        global $DB;
-
-        if ($skillid > 0) {
-            $def = $DB->get_record(manager::TABLE_DEF, ['courseid' => $courseid, 'id' => $skillid]);
-            if ($def && !empty($def->color)) {
-                return $def->color;
-            }
-        }
-
-        return self::color_for_skill($skillid);
-    }
-
-    /**
      * @param int $skillid
      * @return string
      */
@@ -747,55 +622,14 @@ class grade_provider {
     }
 
     /**
-     * @param float|null $percent
-     * @return string|null
+     * @param int $courseid
+     * @return array<int, \stdClass>
      */
-    private static function percent_to_letter(?float $percent): ?string {
-        if ($percent === null) {
-            return null;
+    private static function get_definitions_by_id(int $courseid): array {
+        $out = [];
+        foreach (manager::get_definitions($courseid) as $def) {
+            $out[(int)$def->id] = $def;
         }
-        if ($percent >= 95) {
-            return 'S+';
-        }
-        if ($percent >= 90) {
-            return 'S';
-        }
-        if ($percent >= 85) {
-            return 'S-';
-        }
-        if ($percent >= 80) {
-            return 'A+';
-        }
-        if ($percent >= 75) {
-            return 'A';
-        }
-        if ($percent >= 70) {
-            return 'A-';
-        }
-        if ($percent >= 65) {
-            return 'B+';
-        }
-        if ($percent >= 60) {
-            return 'B';
-        }
-        if ($percent >= 55) {
-            return 'B-';
-        }
-        if ($percent >= 50) {
-            return 'C+';
-        }
-        if ($percent >= 40) {
-            return 'C';
-        }
-        if ($percent >= 30) {
-            return 'D';
-        }
-        if ($percent >= 15) {
-            return 'E+';
-        }
-        if ($percent >= 5) {
-            return 'E';
-        }
-        return 'E-';
+        return $out;
     }
 }

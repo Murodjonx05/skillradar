@@ -20,6 +20,9 @@
     var hexToRgba = C.hexToRgba;
     var applyPrimaryColor = C.applyPrimaryColor;
     var resolvePrimaryColor = C.resolvePrimaryColor;
+    var renderResults = C.renderResults;
+    var renderTextDebug = C.renderTextDebug;
+    var renderJsonDebug = C.renderJsonDebug;
 
     function ensureMinSkills(detail, strings) {
         var label = (strings && strings.notConfigured) || 'Not configured';
@@ -109,63 +112,6 @@
         };
     }
 
-    function renderResults(container, payload) {
-        if (!container) {
-            return;
-        }
-        var rows = (payload.skills_detail || []).filter(function(item) {
-            return !item.placeholder;
-        });
-        var hasRealValues = rows.some(function(row) {
-            return row.value !== null;
-        });
-        if (!rows.length || !hasRealValues) {
-            container.innerHTML = '<p class="local-skillradar-results-empty">' +
-                (((payload.strings && payload.strings.noResults) || 'No graded skills yet.')) + '</p>';
-            return;
-        }
-        var html = '<h5 class="local-skillradar-results-title">' +
-            (((payload.strings && payload.strings.resultBreakdown) || 'Result breakdown')) +
-            '</h5><div class="local-skillradar-results-list">';
-        rows.forEach(function(row) {
-            html += '<div class="local-skillradar-result-item">' +
-                '<span class="local-skillradar-result-dot" style="background:' + safeHexColor(row.color) + ';"></span>' +
-                '<span class="local-skillradar-result-label">' + escapeHtml(row.label) + '</span>' +
-                '<span class="local-skillradar-result-value">' +
-                (row.value === null ? '—' : row.value.toFixed(2) + '%') +
-                '<span class="local-skillradar-result-meta">' + row.items + ' ' +
-                (((payload.strings && payload.strings.mappedItems) || 'mapped')) +
-                '</span></span>' +
-                '</div>';
-        });
-        html += '</div>';
-        container.innerHTML = html;
-    }
-
-    function renderTextDebug(container, payload) {
-        if (!container) {
-            return;
-        }
-        var rows = payload.skills_detail || [];
-        if (!rows.length) {
-            container.innerHTML = '<p>Нет skills для показа.</p>';
-            return;
-        }
-        container.innerHTML = rows.map(function(row) {
-            return '<p><strong>' + escapeHtml(row.label) + '</strong>: ' +
-                (row.value === null ? '—' : row.value.toFixed(2) + '%') +
-                ' | items=' + row.items +
-                ' | empty=' + (row.empty ? 'true' : 'false') +
-                ' | placeholder=' + (row.placeholder ? 'true' : 'false') +
-                '</p>';
-        }).join('');
-    }
-
-    function renderJsonDebug(container, data) {
-        if (container) {
-            container.textContent = JSON.stringify(data, null, 2);
-        }
-    }
 
     function fetchPayload(config) {
         var params = new URLSearchParams();
@@ -525,7 +471,7 @@
                     value: centerValue,
                     label: centerLabel
                 });
-                renderResults(results, output);
+                renderResults(results, output, true);
                 if (cfg.debugSkillRadar) {
                     renderTextDebug(textdebug, output);
                     renderJsonDebug(jsondebug, {
@@ -554,7 +500,7 @@
                     value: centerValue,
                     label: centerLabel
                 });
-                renderResults(results, fallback);
+                renderResults(results, fallback, true);
                 if (cfg.debugSkillRadar) {
                     renderTextDebug(textdebug, fallback);
                     renderJsonDebug(jsondebug, {

@@ -17,14 +17,21 @@ use grade_item;
  * Grade-item weighted skill axes (legacy mapping UI).
  */
 class calculator {
-    public const MIN_AXES = 3;
+    /** @var array<int, \stdClass> */
+    private static $gradeitemcache = [];
+    /** @var array<string, \stdClass> */
+    private static $gradegradecache = [];
+    /** @var array<string, array<int, float|null>> */
+    private static $bulkpercentcache = [];
+    /** @var array<string, array<int, array{0: float, 1: float}|null>> */
+    private static $rangebatchcache = [];
 
     /**
      * Max points from activity settings (e.g. quiz grade), not only grade_item row.
      *
      * @return float[]|null [grademin, grademax] or null to use generic logic
      */
-    protected static function get_activity_grade_range(grade_item $gi): ?array {
+    protected static function get_activity_grade_range($gi): ?array {
         global $DB;
         if ($gi->itemtype !== 'mod' || empty($gi->itemmodule) || empty($gi->iteminstance)) {
             return null;
@@ -47,7 +54,7 @@ class calculator {
     /**
      * Percent 0–100 from grade_grade + grade_item.
      */
-    protected static function grade_percent_from_grade(grade_grade $grade, grade_item $gradeitem): ?float {
+    protected static function grade_percent_from_grade($grade, $gradeitem): ?float {
         $activityrange = self::get_activity_grade_range($gradeitem);
         if ($activityrange !== null) {
             $gmin = $activityrange[0];
@@ -99,11 +106,12 @@ class calculator {
      * @return float|null
      */
     public static function percent_for_grade_item(int $courseid, int $gradeitemid, int $userid): ?float {
-        $gi = grade_item::fetch(['id' => $gradeitemid, 'courseid' => $courseid]);
+        $items = self::get_grade_items_by_ids($courseid, [$gradeitemid]);
+        $gi = $items[$gradeitemid] ?? null;
         if (!$gi) {
             return null;
         }
-        $grade = grade_grade::fetch(['itemid' => $gi->id, 'userid' => $userid]);
+        $grade = self::get_grade_for_user_item($userid, $gi->id);
         if (!$grade) {
             return null;
         }
@@ -116,13 +124,13 @@ class calculator {
         $mappings = manager::get_mappings($courseid);
 
         $detail = self::build_skill_rows($courseid, $userid, $definitions, $mappings);
-        $detail = self::dedupe_duplicate_axis_labels($detail);
-        $chart = self::build_chart_meta($detail);
+        $detail = radar_helper::dedupe_duplicate_axis_labels($detail);
+        $chart = radar_helper::build_chart_meta($detail, radar_helper::MIN_AXES, '#CBD5E1', true);
         $overall = self::compute_overall($courseid, $userid, $config, $detail);
 
         $primary = $config->primarycolor ?? '#3B82F6';
         $payload = [
-            'skills' => self::build_skills_map($detail),
+            'skills' => radar_helper::build_skills_map($detail),
             'skills_detail' => $detail,
             'mapping_meta' => self::build_mapping_meta($courseid, $definitions, $mappings),
             'chart' => $chart,
@@ -163,6 +171,16 @@ class calculator {
             $orderedkeys[] = $sk;
         }
 
+        $gradeitemids = [];
+        foreach ($mappings as $mapping) {
+            $gradeitemid = (int)$mapping->gradeitemid;
+            if ($gradeitemid > 0) {
+                $gradeitemids[$gradeitemid] = $gradeitemid;
+            }
+        }
+        $gradeitems = self::get_grade_items_by_ids($courseid, array_values($gradeitemids));
+        $gradegrades = self::get_grade_grades_for_user($userid, array_values($gradeitemids));
+
         $rows = [];
         foreach ($orderedkeys as $skillkey) {
             if (isset($defbykey[$skillkey])) {
@@ -200,12 +218,12 @@ class calculator {
             }
 
             $rows[$sk]['items']++;
-            $gradeitem = grade_item::fetch(['id' => $mapping->gradeitemid, 'courseid' => $courseid]);
+            $gradeitem = $gradeitems[(int)$mapping->gradeitemid] ?? null;
             if (!$gradeitem) {
                 continue;
             }
 
-            $grade = grade_grade::fetch(['itemid' => $gradeitem->id, 'userid' => $userid]);
+            $grade = $gradegrades[(int)$gradeitem->id] ?? null;
             if (!$grade) {
                 continue;
             }
@@ -235,81 +253,6 @@ class calculator {
         return array_values($rows);
     }
 
-    /**
-     * Same display name on several axes makes the radar unreadable — append skill key for duplicates.
-     *
-     * @param array $detail
-     * @return array
-     */
-    private static function dedupe_duplicate_axis_labels(array $detail): array {
-        $labels = [];
-        foreach ($detail as $row) {
-            if (!empty($row['placeholder'])) {
-                continue;
-            }
-            $labels[] = trim((string)($row['label'] ?? ''));
-        }
-        $counts = array_count_values($labels);
-        foreach ($detail as &$row) {
-            if (!empty($row['placeholder'])) {
-                continue;
-            }
-            $lab = trim((string)($row['label'] ?? ''));
-            if (($counts[$lab] ?? 0) > 1) {
-                $k = trim((string)($row['key'] ?? ''));
-                $row['label'] = $lab . ' · ' . ($k !== '' ? $k : '?');
-            }
-        }
-        unset($row);
-
-        return $detail;
-    }
-
-    protected static function build_skills_map(array $detail): array {
-        $skills = [];
-        foreach ($detail as $row) {
-            if ($row['placeholder']) {
-                continue;
-            }
-            $skills[$row['label']] = $row['value'] === null ? 0.0 : (float)$row['value'];
-        }
-        return $skills;
-    }
-
-    public static function build_chart_meta(array $detail): array {
-        $labels = [];
-        $values = [];
-        $colors = [];
-        $placeholders = [];
-        $keys = [];
-
-        foreach ($detail as $row) {
-            $labels[] = $row['label'];
-            $values[] = $row['value'];
-            $colors[] = $row['empty'] ? '#94A3B8' : $row['color'];
-            $placeholders[] = false;
-            $keys[] = $row['key'];
-        }
-
-        $i = 0;
-        while (count($labels) < self::MIN_AXES) {
-            $labels[] = get_string('notconfigured', 'local_skillradar');
-            $values[] = null;
-            $colors[] = '#CBD5E1';
-            $placeholders[] = true;
-            $keys[] = '_placeholder_' . $i;
-            $i++;
-        }
-
-        return [
-            'labels' => $labels,
-            'values' => $values,
-            'colors' => $colors,
-            'placeholder' => $placeholders,
-            'keys' => $keys,
-        ];
-    }
-
     public static function build_mapping_meta(int $courseid, array $definitions, array $mappings): array {
         global $DB;
         $defbykey = [];
@@ -318,6 +261,14 @@ class calculator {
         }
 
         $meta = [];
+        $gradeitemids = [];
+        foreach ($mappings as $mapping) {
+            $gradeitemid = (int)$mapping->gradeitemid;
+            if ($gradeitemid > 0) {
+                $gradeitemids[$gradeitemid] = $gradeitemid;
+            }
+        }
+        $gradeitems = self::get_grade_items_by_ids($courseid, array_values($gradeitemids));
         foreach ($mappings as $mapping) {
             $sk = trim((string) $mapping->skill_key);
             if ($sk === '' || $sk === '_none') {
@@ -341,7 +292,7 @@ class calculator {
                     ];
                 }
             }
-            $gi = grade_item::fetch(['id' => $mapping->gradeitemid, 'courseid' => $courseid]);
+            $gi = $gradeitems[(int)$mapping->gradeitemid] ?? null;
             if (!$gi) {
                 continue;
             }
@@ -414,7 +365,7 @@ class calculator {
                 }
             }
             if ($letter === '' && $percent !== null) {
-                $letter = self::percent_to_letter($percent);
+                $letter = (string)(radar_helper::percent_to_letter($percent) ?? '');
             }
         } else {
             $nonempty = [];
@@ -430,7 +381,7 @@ class calculator {
             if ($nonempty !== []) {
                 $percent = round(array_sum($nonempty) / count($nonempty), 2);
             }
-            $letter = self::percent_to_letter($percent);
+            $letter = (string)(radar_helper::percent_to_letter($percent) ?? '');
         }
 
         return [
@@ -439,62 +390,13 @@ class calculator {
         ];
     }
 
-    protected static function percent_to_letter(?float $percent): string {
-        if ($percent === null) {
-            return '';
-        }
-        if ($percent >= 95) {
-            return 'S+';
-        }
-        if ($percent >= 90) {
-            return 'S';
-        }
-        if ($percent >= 85) {
-            return 'S-';
-        }
-        if ($percent >= 80) {
-            return 'A+';
-        }
-        if ($percent >= 75) {
-            return 'A';
-        }
-        if ($percent >= 70) {
-            return 'A-';
-        }
-        if ($percent >= 65) {
-            return 'B+';
-        }
-        if ($percent >= 60) {
-            return 'B';
-        }
-        if ($percent >= 55) {
-            return 'B-';
-        }
-        if ($percent >= 50) {
-            return 'C+';
-        }
-        if ($percent >= 40) {
-            return 'C';
-        }
-        if ($percent >= 30) {
-            return 'D';
-        }
-        if ($percent >= 15) {
-            return 'E+';
-        }
-        if ($percent >= 5) {
-            return 'E';
-        }
-        return 'E-';
-    }
-
     public static function build_course_average(int $courseid, array $detail): array {
         global $DB;
         $mappings = manager::get_mappings($courseid);
         if ($mappings === []) {
             return [
                 'label' => get_string('courseaveragelegend', 'local_skillradar'),
-                'values' => array_fill(0, max(count($detail), self::MIN_AXES), null),
+                'values' => array_fill(0, max(count($detail), radar_helper::MIN_AXES), null),
             ];
         }
 
@@ -513,7 +415,7 @@ class calculator {
         if ($weightsbyskill === [] || $gradeitemids === []) {
             return [
                 'label' => get_string('courseaveragelegend', 'local_skillradar'),
-                'values' => array_fill(0, max(count($detail), self::MIN_AXES), null),
+                'values' => array_fill(0, max(count($detail), radar_helper::MIN_AXES), null),
             ];
         }
 
@@ -522,11 +424,11 @@ class calculator {
         if ($gradeitems === []) {
             return [
                 'label' => get_string('courseaveragelegend', 'local_skillradar'),
-                'values' => array_fill(0, max(count($detail), self::MIN_AXES), null),
+                'values' => array_fill(0, max(count($detail), radar_helper::MIN_AXES), null),
             ];
         }
 
-        $itemranges = self::resolve_grade_item_ranges($gradeitems);
+        $itemranges = self::resolve_grade_item_ranges($courseid, $gradeitems);
         $recordset = $DB->get_recordset_sql(
             "SELECT gg.userid,
                     gg.itemid,
@@ -588,7 +490,7 @@ class calculator {
             $values[] = $samples ? round(array_sum($samples) / count($samples), 2) : null;
         }
 
-        while (count($values) < self::MIN_AXES) {
+        while (count($values) < radar_helper::MIN_AXES) {
             $values[] = null;
         }
 
@@ -602,7 +504,11 @@ class calculator {
      * @param array<int, \stdClass> $gradeitems
      * @return array<int, array{0: float, 1: float}|null>
      */
-    private static function resolve_grade_item_ranges(array $gradeitems): array {
+    private static function resolve_grade_item_ranges(int $courseid, array $gradeitems): array {
+        $cachekey = $courseid . ':' . implode(',', array_keys($gradeitems));
+        if (isset(self::$rangebatchcache[$cachekey])) {
+            return self::$rangebatchcache[$cachekey];
+        }
         global $DB;
 
         $ranges = [];
@@ -645,6 +551,7 @@ class calculator {
             }
         }
 
+        self::$rangebatchcache[$cachekey] = $ranges;
         return $ranges;
     }
 
@@ -694,5 +601,145 @@ class calculator {
         }
 
         return (((float)$grade->finalgrade - $gmin) / $grange) * 100.0;
+    }
+
+    /**
+     * @param int $courseid
+     * @param int[] $gradeitemids
+     * @return array<int, \stdClass>
+     */
+    private static function get_grade_items_by_ids(int $courseid, array $gradeitemids): array {
+        global $DB;
+
+        $gradeitemids = array_values(array_unique(array_filter(array_map('intval', $gradeitemids))));
+        $missing = [];
+        foreach ($gradeitemids as $gradeitemid) {
+            if (!isset(self::$gradeitemcache[$gradeitemid])) {
+                $missing[] = $gradeitemid;
+            }
+        }
+        if ($missing !== []) {
+            [$insql, $params] = $DB->get_in_or_equal($missing, SQL_PARAMS_NAMED, 'gi');
+            $params['courseid'] = $courseid;
+            $records = $DB->get_records_sql(
+                "SELECT *
+                   FROM {grade_items}
+                  WHERE courseid = :courseid
+                    AND id {$insql}",
+                $params
+            );
+            foreach ($missing as $gradeitemid) {
+                if (isset($records[$gradeitemid])) {
+                    self::$gradeitemcache[$gradeitemid] = $records[$gradeitemid];
+                }
+            }
+        }
+        $out = [];
+        foreach ($gradeitemids as $gradeitemid) {
+            if (isset(self::$gradeitemcache[$gradeitemid])) {
+                $out[$gradeitemid] = self::$gradeitemcache[$gradeitemid];
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * @param int $userid
+     * @param int[] $gradeitemids
+     * @return array<int, \stdClass>
+     */
+    private static function get_grade_grades_for_user(int $userid, array $gradeitemids): array {
+        global $DB;
+
+        $gradeitemids = array_values(array_unique(array_filter(array_map('intval', $gradeitemids))));
+        $out = [];
+        $missing = [];
+        foreach ($gradeitemids as $gradeitemid) {
+            $key = $userid . ':' . $gradeitemid;
+            if (isset(self::$gradegradecache[$key])) {
+                $out[$gradeitemid] = self::$gradegradecache[$key];
+            } else {
+                $missing[] = $gradeitemid;
+            }
+        }
+        if ($missing !== []) {
+            [$insql, $params] = $DB->get_in_or_equal($missing, SQL_PARAMS_NAMED, 'gg');
+            $params['userid'] = $userid;
+            $records = $DB->get_records_sql(
+                "SELECT *
+                   FROM {grade_grades}
+                  WHERE userid = :userid
+                    AND itemid {$insql}",
+                $params
+            );
+            foreach ($records as $record) {
+                self::$gradegradecache[$userid . ':' . (int)$record->itemid] = $record;
+                $out[(int)$record->itemid] = $record;
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * @param int $userid
+     * @param int $gradeitemid
+     * @return \stdClass|null
+     */
+    private static function get_grade_for_user_item(int $userid, int $gradeitemid): ?\stdClass {
+        $grades = self::get_grade_grades_for_user($userid, [$gradeitemid]);
+        return $grades[$gradeitemid] ?? null;
+    }
+
+    /**
+     * @param int $courseid
+     * @param int[] $gradeitemids
+     * @param int $userid
+     * @return array<int, float|null>
+     */
+    public static function percent_for_grade_items(int $courseid, array $gradeitemids, int $userid): array {
+        $gradeitemids = array_values(array_unique(array_filter(array_map('intval', $gradeitemids))));
+        $cachekey = $courseid . ':' . $userid . ':' . implode(',', $gradeitemids);
+        if (isset(self::$bulkpercentcache[$cachekey])) {
+            return self::$bulkpercentcache[$cachekey];
+        }
+        $gradeitems = self::get_grade_items_by_ids($courseid, $gradeitemids);
+        $grades = self::get_grade_grades_for_user($userid, array_keys($gradeitems));
+        $ranges = self::resolve_grade_item_ranges($courseid, $gradeitems);
+        $out = [];
+        foreach ($gradeitems as $gradeitemid => $gradeitem) {
+            $grade = $grades[$gradeitemid] ?? null;
+            $out[$gradeitemid] = $grade ? self::grade_percent_from_grade_record($grade, $gradeitem, $ranges[$gradeitemid] ?? null) : null;
+        }
+        self::$bulkpercentcache[$cachekey] = $out;
+        return $out;
+    }
+
+    /**
+     * @param int $courseid
+     * @param int $gradeitemid
+     * @return float|null
+     */
+    public static function average_percent_for_grade_item_bulk(int $courseid, int $gradeitemid): ?float {
+        global $DB;
+
+        $items = self::get_grade_items_by_ids($courseid, [$gradeitemid]);
+        $gradeitem = $items[$gradeitemid] ?? null;
+        if (!$gradeitem) {
+            return null;
+        }
+        $range = self::resolve_grade_item_ranges($courseid, [$gradeitemid => $gradeitem])[$gradeitemid] ?? null;
+        $recordset = $DB->get_recordset('grade_grades', ['itemid' => $gradeitemid], '', 'userid,itemid,rawgrade,rawgrademin,rawgrademax,finalgrade');
+        $samples = [];
+        foreach ($recordset as $record) {
+            $percent = self::grade_percent_from_grade_record($record, $gradeitem, $range);
+            if ($percent !== null) {
+                $samples[] = $percent;
+            }
+        }
+        $recordset->close();
+        if ($samples === []) {
+            return null;
+        }
+        return round(array_sum($samples) / count($samples), 2);
     }
 }

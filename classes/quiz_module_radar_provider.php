@@ -57,14 +57,43 @@ class quiz_module_radar_provider {
         global $DB;
 
         $sql = "SELECT MAX(gi.id) AS gradeitemid,
-                       gi.iteminstance AS quizid
+                       gi.iteminstance AS quizid,
+                       MAX(q.name) AS quizname
                   FROM {grade_items} gi
+             LEFT JOIN {quiz} q ON q.id = gi.iteminstance
                  WHERE gi.courseid = :courseid
                    AND gi.itemtype = 'mod'
                    AND gi.itemmodule = 'quiz'
               GROUP BY gi.iteminstance
               ORDER BY MIN(gi.sortorder) ASC, gi.iteminstance ASC";
         $rows = $DB->get_records_sql($sql, ['courseid' => $courseid]);
+        $gradeitemids = [];
+        $quizids = [];
+        foreach ($rows as $row) {
+            $gradeitemids[] = (int)$row->gradeitemid;
+            $quizids[] = (int)$row->quizid;
+        }
+        $gradebookpercents = calculator::percent_for_grade_items($courseid, $gradeitemids, $userid);
+        $materializedrecords = $DB->get_records_sql(
+            "SELECT quizid, SUM(earned) AS earned, SUM(maxearned) AS maxearned
+               FROM {" . cache_manager::TABLE_USER . "}
+              WHERE courseid = :courseid
+                AND userid = :userid
+                AND aggregation_strategy = :strategy
+           GROUP BY quizid",
+            [
+                'courseid' => $courseid,
+                'userid' => $userid,
+                'strategy' => cache_manager::STRATEGY_LATEST,
+            ]
+        );
+        $materialized = [];
+        foreach ($materializedrecords as $record) {
+            $max = (float)$record->maxearned;
+            $materialized[(int)$record->quizid] = $max > 0.0
+                ? skill_aggregator::compute_percent((float)$record->earned, $max)
+                : null;
+        }
 
         $detail = [];
         $palette = ['#2563EB', '#059669', '#DC2626', '#D97706', '#7C3AED', '#0891B2'];
@@ -72,13 +101,12 @@ class quiz_module_radar_provider {
         foreach ($rows as $row) {
             $gradeitemid = (int)$row->gradeitemid;
             $quizid = (int)$row->quizid;
-            $quiz = $DB->get_record('quiz', ['id' => $quizid], 'id, name');
-            $label = $quiz ? format_string($quiz->name) : 'Quiz #' . $quizid;
+            $label = !empty($row->quizname) ? format_string($row->quizname) : 'Quiz #' . $quizid;
 
-            $materialized = self::materialized_quiz_percent($courseid, $quizid, $userid);
-            $gradebookpct = calculator::percent_for_grade_item($courseid, $gradeitemid, $userid);
-            if ($materialized !== null) {
-                $pct = $materialized;
+            $materializedpct = $materialized[$quizid] ?? null;
+            $gradebookpct = $gradebookpercents[$gradeitemid] ?? null;
+            if ($materializedpct !== null) {
+                $pct = $materializedpct;
                 $metric = 'materialized_slots';
             } else {
                 $pct = $gradebookpct;
@@ -101,7 +129,7 @@ class quiz_module_radar_provider {
             $idx++;
         }
 
-        $chart = calculator::build_chart_meta($detail);
+        $chart = radar_helper::build_chart_meta($detail, radar_helper::MIN_AXES, '#CBD5E1', true);
         $vals = [];
         foreach ($detail as $r) {
             if (empty($r['placeholder']) && $r['value'] !== null) {

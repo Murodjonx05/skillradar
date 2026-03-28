@@ -139,6 +139,6 @@ class observer {
         ]];
 
         manager::replace_question_skill_mappings($courseid, $rows);
-        manager::rebuild_course_quiz_attempts($courseid);
+        manager::queue_course_rebuild($courseid);
     }
 }

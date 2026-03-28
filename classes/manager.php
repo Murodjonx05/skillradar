@@ -25,6 +25,8 @@ class manager {
     private static $qmaptableexists = null;
     /** @var array<int, array<int, int>> */
     private static $taggedskillquestioncountcache = [];
+    /** @var array<int, array<int, \stdClass>> */
+    private static $definitionscache = [];
 
     public static function get_course_config(int $courseid): stdClass {
         global $DB;
@@ -62,7 +64,10 @@ class manager {
      */
     public static function get_definitions(int $courseid): array {
         global $DB;
-        return $DB->get_records(self::TABLE_DEF, ['courseid' => $courseid], 'sortorder ASC, id ASC');
+        if (!isset(self::$definitionscache[$courseid])) {
+            self::$definitionscache[$courseid] = $DB->get_records(self::TABLE_DEF, ['courseid' => $courseid], 'sortorder ASC, id ASC');
+        }
+        return self::$definitionscache[$courseid];
     }
 
     /**
@@ -152,6 +157,7 @@ class manager {
         $cache = cache::make('local_skillradar', 'skillpayload');
         $cache->set(self::CACHE_REV_PREFIX . $courseid, time());
         unset(self::$taggedskillquestioncountcache[$courseid]);
+        unset(self::$definitionscache[$courseid]);
     }
 
     public static function invalidate_user_cache(int $courseid, int $userid): void {
@@ -362,14 +368,13 @@ class manager {
             return [];
         }
         $counts = [];
+        $questionids = [];
         foreach ($questions as $q) {
-            try {
-                $skill = skill_service::get_question_skill((int)$q->questionid, $courseid);
-            } catch (\Throwable $e) {
-                debugging('local_skillradar get_tagged_skill_question_counts q=' . (int)($q->questionid ?? 0) . ': ' .
-                    $e->getMessage(), DEBUG_DEVELOPER);
-                continue;
-            }
+            $questionids[] = (int)$q->questionid;
+        }
+        $skills = skill_service::get_question_skills($courseid, $questionids);
+        foreach ($questions as $q) {
+            $skill = $skills[(int)$q->questionid] ?? null;
             if (!$skill || (int)$skill->skillid <= 0) {
                 continue;
             }
@@ -477,6 +482,7 @@ class manager {
     public static function reset_static_caches(): void {
         self::$qmaptableexists = null;
         self::$taggedskillquestioncountcache = [];
+        self::$definitionscache = [];
     }
 
     /**
@@ -494,7 +500,7 @@ class manager {
             \core_php_time_limit::raise(600);
         }
 
-        $attemptids = $DB->get_fieldset_sql(
+        $rs = $DB->get_recordset_sql(
             "SELECT qa.id
                FROM {quiz_attempts} qa
                JOIN {quiz} q ON q.id = qa.quiz
@@ -507,7 +513,43 @@ class manager {
                 'state' => \mod_quiz\quiz_attempt::FINISHED,
             ]
         );
+        $batchsize = 100;
+        $buffer = [];
+        foreach ($rs as $record) {
+            $buffer[] = (int)$record->id;
+            if (count($buffer) < $batchsize) {
+                continue;
+            }
+            self::rebuild_attempt_batch($buffer);
+            $buffer = [];
+        }
+        $rs->close();
+        if ($buffer !== []) {
+            self::rebuild_attempt_batch($buffer);
+        }
 
+        self::invalidate_course_cache($courseid);
+    }
+
+    /**
+     * @param int $courseid
+     * @return void
+     */
+    public static function queue_course_rebuild(int $courseid): void {
+        if ($courseid < 1) {
+            return;
+        }
+        $task = new \local_skillradar\task\rebuild_course_analytics();
+        $task->set_component('local_skillradar');
+        $task->set_custom_data(['courseid' => $courseid]);
+        \core\task\manager::queue_adhoc_task($task, true);
+    }
+
+    /**
+     * @param int[] $attemptids
+     * @return void
+     */
+    private static function rebuild_attempt_batch(array $attemptids): void {
         foreach ($attemptids as $aid) {
             try {
                 cache_manager::recompute_attempt((int)$aid);
@@ -515,7 +557,5 @@ class manager {
                 debugging('local_skillradar rebuild attempt ' . $aid . ': ' . $e->getMessage(), DEBUG_DEVELOPER);
             }
         }
-
-        self::invalidate_course_cache($courseid);
     }
 }

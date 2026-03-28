@@ -59,6 +59,14 @@ class attempt_analyzer {
 
         $dm = new \question_engine_data_mapper();
         $lateststeps = $dm->load_questions_usages_latest_steps(new \qubaid_list([(int)$attempt->uniqueid]));
+        $questionids = [];
+        foreach ($lateststeps as $step) {
+            $questionid = (int)$step->questionid;
+            if ($questionid > 0) {
+                $questionids[$questionid] = $questionid;
+            }
+        }
+        $skillsbyquestion = skill_service::get_question_skills((int)$attempt->courseid, array_values($questionids));
 
         $rows = [];
         foreach ($lateststeps as $step) {
@@ -74,7 +82,7 @@ class attempt_analyzer {
                 continue;
             }
 
-            $skill = skill_service::get_question_skill((int)$step->questionid, (int)$attempt->courseid);
+            $skill = $skillsbyquestion[(int)$step->questionid] ?? null;
             if ($skill === null) {
                 continue;
             }

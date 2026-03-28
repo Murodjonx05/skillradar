@@ -245,11 +245,18 @@ class cache_manager {
         global $DB;
 
         list($insql, $params) = $DB->get_in_or_equal($attemptids, SQL_PARAMS_NAMED, 'att');
-        $sql = "SELECT DISTINCT sar.skillid
-                  FROM {" . self::TABLE_ATTEMPT . "} sar
-                 WHERE sar.attemptid $insql";
-        $skillids = $DB->get_fieldset_sql($sql, $params);
-        if ($skillids === []) {
+        $rows = $DB->get_records_sql(
+            "SELECT sar.skillid,
+                    MAX(sar.skillname) AS skillname,
+                    AVG(sar.percent) AS avgpercent,
+                    MAX(sar.questions_count) AS questions_count,
+                    MAX(sar.calculation_version) AS calculation_version
+               FROM {" . self::TABLE_ATTEMPT . "} sar
+              WHERE sar.attemptid {$insql}
+           GROUP BY sar.skillid",
+            $params
+        );
+        if ($rows === []) {
             return;
         }
 
@@ -260,47 +267,25 @@ class cache_manager {
             'attempt_ids' => array_values($attemptids),
         ], JSON_UNESCAPED_UNICODE);
 
-        foreach ($skillids as $skillid) {
-            $skillid = (int)$skillid;
-            $percents = [];
-            $questionsmax = 0;
-            $calcver = 1;
-            $name = '';
-
-            foreach ($attemptids as $aid) {
-                $row = $DB->get_record(self::TABLE_ATTEMPT, ['attemptid' => $aid, 'skillid' => $skillid]);
-                if (!$row) {
-                    continue;
-                }
-                $name = (string)$row->skillname;
-                $calcver = (int)$row->calculation_version;
-                $questionsmax = max($questionsmax, (int)$row->questions_count);
-                if ((float)$row->maxearned > 0) {
-                    $percents[] = skill_aggregator::compute_percent((float)$row->earned, (float)$row->maxearned);
-                }
-            }
-
-            if ($percents === []) {
+        foreach ($rows as $row) {
+            $avgpercent = $row->avgpercent !== null ? round((float)$row->avgpercent, 2) : null;
+            if ($avgpercent === null) {
                 continue;
             }
-
-            $avgpercent = round(array_sum($percents) / count($percents), 2);
-            $scale = 100.0;
-
             $record = (object)[
                 'courseid' => $courseid,
                 'quizid' => $quizid,
                 'userid' => $userid,
-                'skillid' => $skillid,
-                'skillname' => $name !== '' ? $name : 'skill',
+                'skillid' => (int)$row->skillid,
+                'skillname' => (string)$row->skillname !== '' ? (string)$row->skillname : 'skill',
                 'source_attemptid' => 0,
                 'aggregation_strategy' => self::STRATEGY_LATEST,
                 'earned' => round($avgpercent, 5),
-                'maxearned' => $scale,
+                'maxearned' => 100.0,
                 'percent' => $avgpercent,
-                'questions_count' => $questionsmax,
+                'questions_count' => (int)$row->questions_count,
                 'attempts_count' => $attemptcount,
-                'calculation_version' => $calcver,
+                'calculation_version' => (int)$row->calculation_version,
                 'debugmeta' => $meta,
                 'timemodified' => $now,
             ];
