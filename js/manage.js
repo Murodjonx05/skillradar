@@ -20,6 +20,9 @@
     var hexToRgba = C.hexToRgba;
     var applyPrimaryColor = C.applyPrimaryColor;
     var resolvePrimaryColor = C.resolvePrimaryColor;
+    var renderResults = C.renderResults;
+    var renderTextDebug = C.renderTextDebug;
+    var renderJsonDebug = C.renderJsonDebug;
 
     function ensureMinSkills(detail, strings) {
         var label = (strings && strings.notConfigured) || 'Not configured';
@@ -109,63 +112,6 @@
         };
     }
 
-    function renderResults(container, payload) {
-        if (!container) {
-            return;
-        }
-        var rows = (payload.skills_detail || []).filter(function(item) {
-            return !item.placeholder;
-        });
-        var hasRealValues = rows.some(function(row) {
-            return row.value !== null;
-        });
-        if (!rows.length || !hasRealValues) {
-            container.innerHTML = '<p class="local-skillradar-results-empty">' +
-                (((payload.strings && payload.strings.noResults) || 'No graded skills yet.')) + '</p>';
-            return;
-        }
-        var html = '<h5 class="local-skillradar-results-title">' +
-            (((payload.strings && payload.strings.resultBreakdown) || 'Result breakdown')) +
-            '</h5><div class="local-skillradar-results-list">';
-        rows.forEach(function(row) {
-            html += '<div class="local-skillradar-result-item">' +
-                '<span class="local-skillradar-result-dot" style="background:' + safeHexColor(row.color) + ';"></span>' +
-                '<span class="local-skillradar-result-label">' + escapeHtml(row.label) + '</span>' +
-                '<span class="local-skillradar-result-value">' +
-                (row.value === null ? '—' : row.value.toFixed(2) + '%') +
-                '<span class="local-skillradar-result-meta">' + row.items + ' ' +
-                (((payload.strings && payload.strings.mappedItems) || 'mapped')) +
-                '</span></span>' +
-                '</div>';
-        });
-        html += '</div>';
-        container.innerHTML = html;
-    }
-
-    function renderTextDebug(container, payload) {
-        if (!container) {
-            return;
-        }
-        var rows = payload.skills_detail || [];
-        if (!rows.length) {
-            container.innerHTML = '<p>Нет skills для показа.</p>';
-            return;
-        }
-        container.innerHTML = rows.map(function(row) {
-            return '<p><strong>' + escapeHtml(row.label) + '</strong>: ' +
-                (row.value === null ? '—' : row.value.toFixed(2) + '%') +
-                ' | items=' + row.items +
-                ' | empty=' + (row.empty ? 'true' : 'false') +
-                ' | placeholder=' + (row.placeholder ? 'true' : 'false') +
-                '</p>';
-        }).join('');
-    }
-
-    function renderJsonDebug(container, data) {
-        if (container) {
-            container.textContent = JSON.stringify(data, null, 2);
-        }
-    }
 
     function fetchPayload(config) {
         var params = new URLSearchParams();
@@ -193,6 +139,35 @@
         });
     }
 
+    function pickManagePayload(payload) {
+        if (payload && payload.course_skills_radar) {
+            return payload.course_skills_radar;
+        }
+        return payload;
+    }
+
+    /**
+     * @param {Array} chartVals
+     * @param {boolean[]} placeholder
+     * @returns {{mappedVals: Array, hasUserValues: boolean}}
+     */
+    function mapChartValuesWithPlaceholders(chartVals, placeholder) {
+        var hasUserValues = false;
+        var mappedVals = new Array(chartVals.length);
+        for (var vi = 0; vi < chartVals.length; vi++) {
+            if (placeholder[vi]) {
+                mappedVals[vi] = null;
+                continue;
+            }
+            var val = chartVals[vi];
+            if (val !== null && val !== undefined) {
+                hasUserValues = true;
+            }
+            mappedVals[vi] = val === null || val === undefined ? 0 : val;
+        }
+        return {mappedVals: mappedVals, hasUserValues: hasUserValues};
+    }
+
     function buildDatasets(payload, ctx) {
         var canvas = ctx.canvas;
         var primary = resolvePrimaryColor(payload, null);
@@ -201,19 +176,22 @@
         gradient.addColorStop(1, hexToRgba(primary, 0.08));
 
         var chartVals = payload.chart && payload.chart.values ? payload.chart.values : [];
-        var hasUserValues = false;
-        var mappedVals = new Array(chartVals.length);
-        for (var vi = 0; vi < chartVals.length; vi++) {
-            var val = chartVals[vi];
-            if (val !== null) {
-                hasUserValues = true;
-            }
-            mappedVals[vi] = val === null ? 0 : val;
-        }
+        var placeholder = payload.chart && payload.chart.placeholder ? payload.chart.placeholder : [];
+        var mapped = mapChartValuesWithPlaceholders(chartVals, placeholder);
+        var mappedVals = mapped.mappedVals;
+        var hasUserValues = mapped.hasUserValues;
         var solid = hexToRgba(primary, 1);
+        function managePointRadius(ctx, active, idle) {
+            var d = ctx.dataset.data[ctx.dataIndex];
+            if (d === null || typeof d === 'undefined' || (typeof d === 'number' && isNaN(d))) {
+                return 0;
+            }
+            return hasUserValues ? active : idle;
+        }
         var datasets = [{
             label: 'Skill level (%)',
             data: mappedVals,
+            spanGaps: false,
             radarArcSegments: true,
             radarArcStrokeWidth: 2.4,
             backgroundColor: hasUserValues ? gradient : 'rgba(148, 163, 184, 0.08)',
@@ -223,8 +201,12 @@
             pointBorderColor: '#fff',
             pointHoverBackgroundColor: '#fff',
             pointHoverBorderColor: hasUserValues ? solid : 'rgba(148, 163, 184, 0.95)',
-            pointRadius: hasUserValues ? 6 : 4,
-            pointHoverRadius: 7,
+            pointRadius: function(ctx) {
+                return managePointRadius(ctx, 6, 4);
+            },
+            pointHoverRadius: function(ctx) {
+                return managePointRadius(ctx, 7, 5);
+            },
             borderWidth: 0,
             fill: false,
             tension: 0,
@@ -234,13 +216,17 @@
         }];
 
         if (payload.course_average && payload.course_average.values) {
-            var avgVals = payload.course_average.values;
+            var avgData = C.alignCourseAverageValuesToChart(payload, 'null');
+            var avgDefinedPoints = avgData.filter(function(value) {
+                return value !== null && typeof value !== 'undefined' &&
+                    !(typeof value === 'number' && isNaN(value));
+            }).length;
+            if (avgDefinedPoints >= 1) {
             datasets.push({
                 label: payload.course_average.label ||
                     ((payload.strings && payload.strings.courseAverageLegend) || 'Course average'),
-                data: avgVals.map(function(value) {
-                    return value === null ? 0 : value;
-                }),
+                data: avgData,
+                spanGaps: false,
                 radarArcSegments: true,
                 radarArcStrokeWidth: 1.8,
                 radarWaveAmp: 0.022,
@@ -250,12 +236,25 @@
                 borderColor: 'rgba(100, 116, 139, 0.9)',
                 pointBackgroundColor: 'rgba(100, 116, 139, 0.9)',
                 pointBorderColor: '#fff',
-                pointRadius: 4,
-                pointHoverRadius: 5,
+                pointRadius: function(ctx) {
+                    var d = ctx.dataset.data[ctx.dataIndex];
+                    if (d === null || typeof d === 'undefined' || (typeof d === 'number' && isNaN(d))) {
+                        return 0;
+                    }
+                    return 4;
+                },
+                pointHoverRadius: function(ctx) {
+                    var d = ctx.dataset.data[ctx.dataIndex];
+                    if (d === null || typeof d === 'undefined' || (typeof d === 'number' && isNaN(d))) {
+                        return 0;
+                    }
+                    return 5;
+                },
                 borderWidth: 0,
                 fill: false,
                 tension: 0
             });
+            }
         }
 
         return datasets;
@@ -462,8 +461,9 @@
                 if (seq !== previewSeq) {
                     return undefined;
                 }
-                payload.strings = Object.assign({}, strings, payload.strings || {});
-                var output = hasRealGrades(payload) ? payload : fallback;
+                var chartPayload = pickManagePayload(payload) || {};
+                chartPayload.strings = Object.assign({}, strings, payload.strings || {}, chartPayload.strings || {});
+                var output = hasRealGrades(chartPayload) ? chartPayload : fallback;
                 lastPreviewOutput = output;
                 applyPrimaryColor(root, resolvePrimaryColor(output, cfg.primaryColor));
                 renderChart(canvas, output, {
@@ -471,13 +471,14 @@
                     value: centerValue,
                     label: centerLabel
                 });
-                renderResults(results, output);
+                renderResults(results, output, true);
                 if (cfg.debugSkillRadar) {
                     renderTextDebug(textdebug, output);
                     renderJsonDebug(jsondebug, {
-                        mode: hasRealGrades(payload) ? 'api-grades' : 'form-preview-fallback',
+                        mode: hasRealGrades(chartPayload) ? 'api-grades' : 'form-preview-fallback',
                         config: cfg,
                         payload: payload,
+                        chartPayload: chartPayload,
                         fallback: fallback
                     });
                 }
@@ -499,7 +500,7 @@
                     value: centerValue,
                     label: centerLabel
                 });
-                renderResults(results, fallback);
+                renderResults(results, fallback, true);
                 if (cfg.debugSkillRadar) {
                     renderTextDebug(textdebug, fallback);
                     renderJsonDebug(jsondebug, {

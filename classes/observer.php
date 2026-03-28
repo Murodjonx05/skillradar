@@ -5,6 +5,9 @@ namespace local_skillradar;
 
 defined('MOODLE_INTERNAL') || die();
 
+/**
+ * Quiz analytics recompute + grade-item cache invalidation.
+ */
 class observer {
     public static function user_graded(\core\event\user_graded $event): void {
         if (empty($event->courseid) || empty($event->relateduserid)) {
@@ -19,5 +22,156 @@ class observer {
         }
         manager::purge_stale_mappings((int)$event->courseid);
         manager::invalidate_course_cache((int)$event->courseid);
+    }
+
+    public static function attempt_submitted(\mod_quiz\event\attempt_submitted $event): void {
+        self::recompute_attempt((int)$event->objectid);
+    }
+
+    public static function attempt_graded(\mod_quiz\event\attempt_graded $event): void {
+        self::recompute_attempt((int)$event->objectid);
+    }
+
+    public static function attempt_regraded(\mod_quiz\event\attempt_regraded $event): void {
+        self::recompute_attempt((int)$event->objectid);
+    }
+
+    /**
+     * Fired when mod_quiz notifies that manual grading is complete (e.g. cron after all essays marked).
+     * Complements {@see question_manually_graded} which fires per question from the grading UI.
+     */
+    public static function attempt_manual_grading_completed(\mod_quiz\event\attempt_manual_grading_completed $event): void {
+        self::recompute_attempt((int)$event->objectid);
+    }
+
+    public static function question_manually_graded(\mod_quiz\event\question_manually_graded $event): void {
+        $attemptid = 0;
+        if (!empty($event->other) && array_key_exists('attemptid', $event->other)) {
+            $attemptid = (int)$event->other['attemptid'];
+        }
+        self::recompute_attempt($attemptid);
+    }
+
+    /**
+     * Rebuild course analytics when Moodle quiz settings change.
+     *
+     * The second radar is sourced from materialized quiz-attempt analytics. If the quiz grading method
+     * changes (highest / average / first / last), previously materialized local_skill_user_result rows
+     * become stale until the course is recomputed.
+     */
+    public static function course_module_updated(\core\event\course_module_updated $event): void {
+        if (empty($event->courseid) || empty($event->contextinstanceid)) {
+            return;
+        }
+
+        if (empty($event->other) || !is_array($event->other) || ($event->other['modulename'] ?? '') !== 'quiz') {
+            return;
+        }
+
+        manager::invalidate_course_cache((int)$event->courseid);
+        manager::queue_course_rebuild((int)$event->courseid);
+    }
+
+    /**
+     * Analytics only apply to finalized quiz attempts (not submitted-awaiting-grade, in progress, etc.).
+     *
+     * @param int $attemptid
+     * @return void
+     */
+    private static function recompute_attempt(int $attemptid): void {
+        global $DB;
+
+        if ($attemptid < 1) {
+            return;
+        }
+
+        $state = $DB->get_field('quiz_attempts', 'state', ['id' => $attemptid]);
+        if ($state !== \mod_quiz\quiz_attempt::FINISHED) {
+            return;
+        }
+
+        try {
+            cache_manager::recompute_attempt($attemptid);
+        } catch (\Throwable $e) {
+            debugging('local_skillradar recompute_attempt failed for attempt ' . $attemptid . ': ' . $e->getMessage(),
+                DEBUG_DEVELOPER, $e->getTrace());
+        }
+    }
+
+    public static function question_created(\core\event\question_created $event): void {
+        self::persist_question_skill_mapping($event);
+    }
+
+    public static function question_updated(\core\event\question_updated $event): void {
+        self::persist_question_skill_mapping($event);
+    }
+
+    /**
+     * Persists question→skill_key from the question edit form for created/updated question versions.
+     *
+     * @param \core\event\base $event
+     * @return void
+     */
+    private static function persist_question_skill_mapping(\core\event\base $event): void {
+        if (PHP_SAPI === 'cli' || !data_submitted()) {
+            return;
+        }
+        $submission = (array)data_submitted();
+        if (($submission['skillradar_skill_key'] ?? null) === null ||
+                !isset($submission['cmid'], $submission['courseid'], $submission['sesskey'])) {
+            return;
+        }
+        if (!confirm_sesskey((string)$submission['sesskey'])) {
+            return;
+        }
+
+        if (!class_exists(manager::class) || !manager::qmap_table_exists()) {
+            return;
+        }
+
+        $cmid = clean_param($submission['cmid'], PARAM_INT);
+        $courseid = clean_param($submission['courseid'], PARAM_INT);
+        if ($cmid < 1 || $courseid < 1) {
+            return;
+        }
+
+        try {
+            list(, $cm) = get_course_and_cm_from_cmid($cmid);
+        } catch (\Throwable $e) {
+            return;
+        }
+        if ((int) $cm->course !== $courseid) {
+            return;
+        }
+
+        $coursecontext = \context_course::instance($courseid);
+        if (!has_capability('local/skillradar:manage', $coursecontext)) {
+            return;
+        }
+
+        $skillkey = clean_param($submission['skillradar_skill_key'], PARAM_TEXT);
+        $skillkey = trim($skillkey);
+
+        $validkeys = [];
+        foreach (manager::get_definitions($courseid) as $def) {
+            $validkeys[$def->skill_key] = true;
+        }
+
+        if ($skillkey !== '' && $skillkey !== '_none' && !isset($validkeys[$skillkey])) {
+            return;
+        }
+
+        $questionid = (int) $event->objectid;
+        if ($questionid < 1) {
+            return;
+        }
+
+        $rows = [[
+            'questionid' => $questionid,
+            'skill_key' => ($skillkey === '' || $skillkey === '_none') ? '' : $skillkey,
+        ]];
+
+        manager::replace_question_skill_mappings($courseid, $rows);
+        manager::queue_course_rebuild($courseid);
     }
 }

@@ -126,6 +126,134 @@
         return fallback || '#3B82F6';
     }
 
+    /**
+     * API course_average.values align to non-placeholder chart axes (same order as skills_detail rows in payload).
+     * Chart.js requires every dataset data[] length to match labels[].
+     *
+     * @param {{chart?: object, course_average?: object}} payload
+     * @returns {Array<number|null>}
+     */
+    function alignCourseAverageValuesToChart(payload, missingMode) {
+        var chart = payload.chart || {};
+        var labels = chart.labels || [];
+        var placeholder = chart.placeholder || [];
+        var avgVals = (payload.course_average && payload.course_average.values) ? payload.course_average.values : [];
+        var data = [];
+        var vidx = 0;
+        var i;
+        var mode = missingMode || 'null';
+        for (i = 0; i < labels.length; i++) {
+            if (placeholder[i]) {
+                data.push(null);
+            } else {
+                var raw = vidx < avgVals.length ? avgVals[vidx] : null;
+                vidx++;
+                if (raw === null || typeof raw === 'undefined') {
+                    data.push(mode === 'zero' ? 0 : null);
+                } else {
+                    data.push(raw);
+                }
+            }
+        }
+        return data;
+    }
+
+    function formatPercentValue(val) {
+        if (val === null || typeof val === 'undefined' || val === '') {
+            return '—';
+        }
+        var n = Number(val);
+        if (isNaN(n)) {
+            return '—';
+        }
+        return n.toFixed(2) + '%';
+    }
+
+    function renderResults(container, payload, includeMeta) {
+        if (!container) {
+            return;
+        }
+        if (payload && payload.empty_message &&
+                (payload.empty_single_quiz || payload.empty_tagged_skills || payload.empty_global_gradebook)) {
+            container.innerHTML = '<p class="local-skillradar-results-empty">' + escapeHtml(payload.empty_message) + '</p>';
+            return;
+        }
+        if (!payload || !payload.chart) {
+            container.innerHTML = '<p class="local-skillradar-results-empty">' +
+                (((payload && payload.strings && payload.strings.noResults) || 'No data.')) + '</p>';
+            return;
+        }
+        // Second radar: omit min-axis placeholders only. Keep rows with empty=true but items>=1 (0% until attempt data).
+        var rows = (payload.skills_detail || []).filter(function(item) {
+            if (item.placeholder) {
+                return false;
+            }
+            if (item.empty && (!item.items || Number(item.items) < 1)) {
+                return false;
+            }
+            return true;
+        });
+        var hasRealValues = rows.some(function(row) {
+            return row.value !== null;
+        });
+        if (!rows.length || !hasRealValues) {
+            container.innerHTML = '<p class="local-skillradar-results-empty">' +
+                (((payload.strings && payload.strings.noResults) || 'No graded skills yet.')) + '</p>';
+            return;
+        }
+        var html = '<h5 class="local-skillradar-results-title">' +
+            (((payload.strings && payload.strings.resultBreakdown) || 'Result breakdown')) +
+            '</h5><div class="local-skillradar-results-list">';
+        rows.forEach(function(row) {
+            var itemCount = Number(row && row.items);
+            if (!isFinite(itemCount)) {
+                itemCount = 0;
+            }
+            html += '<div class="local-skillradar-result-item">' +
+                '<span class="local-skillradar-result-dot" style="background:' + safeHexColor(row.color) + ';"></span>' +
+                '<span class="local-skillradar-result-label">' + escapeHtml(row.label) + '</span>' +
+                '<span class="local-skillradar-result-value">' + formatPercentValue(row.value);
+            if (includeMeta) {
+                html += '<span class="local-skillradar-result-meta">' + String(itemCount) + ' ' +
+                    (((payload.strings && payload.strings.mappedItems) || 'mapped')) +
+                    '</span>';
+            }
+            html += '</span></div>';
+        });
+        html += '</div>';
+        container.innerHTML = html;
+    }
+
+    function renderTextDebug(container, payload) {
+        if (!container) {
+            return;
+        }
+        var rows = payload.skills_detail || [];
+        if (!rows.length) {
+            container.innerHTML = '<p>' +
+                (((payload.strings && payload.strings.debugNoSkills) || 'No skills to display.')) + '</p>';
+            return;
+        }
+        container.innerHTML = rows.map(function(row) {
+            var itemCount = Number(row && row.items);
+            if (!isFinite(itemCount)) {
+                itemCount = 0;
+            }
+            return '<p><strong>' + escapeHtml(row.label) + '</strong>: ' +
+                formatPercentValue(row.value) +
+                ' | items=' + String(itemCount) +
+                ' | empty=' + (row.empty ? 'true' : 'false') +
+                ' | placeholder=' + (row.placeholder ? 'true' : 'false') +
+                '</p>';
+        }).join('');
+    }
+
+    function renderJsonDebug(container, data) {
+        if (container) {
+            container.textContent = JSON.stringify(data, null, 2);
+        }
+    }
+
     global.localSkillRadarCommon = {
         RADAR_R_MIN: RADAR_R_MIN,
         RADAR_R_MAX: RADAR_R_MAX,
@@ -136,6 +264,11 @@
         hexToRgb: hexToRgb,
         hexToRgba: hexToRgba,
         applyPrimaryColor: applyPrimaryColor,
-        resolvePrimaryColor: resolvePrimaryColor
+        resolvePrimaryColor: resolvePrimaryColor,
+        alignCourseAverageValuesToChart: alignCourseAverageValuesToChart,
+        formatPercentValue: formatPercentValue,
+        renderResults: renderResults,
+        renderTextDebug: renderTextDebug,
+        renderJsonDebug: renderJsonDebug
     };
 })(typeof window !== 'undefined' ? window : this);
