@@ -45,6 +45,26 @@ class observer {
     }
 
     /**
+     * Rebuild course analytics when Moodle quiz settings change.
+     *
+     * The second radar is sourced from materialized quiz-attempt analytics. If the quiz grading method
+     * changes (highest / average / first / last), previously materialized local_skill_user_result rows
+     * become stale until the course is recomputed.
+     */
+    public static function course_module_updated(\core\event\course_module_updated $event): void {
+        if (empty($event->courseid) || empty($event->contextinstanceid)) {
+            return;
+        }
+
+        if (empty($event->other) || !is_array($event->other) || ($event->other['modulename'] ?? '') !== 'quiz') {
+            return;
+        }
+
+        manager::invalidate_course_cache((int)$event->courseid);
+        manager::queue_course_rebuild((int)$event->courseid);
+    }
+
+    /**
      * Analytics only apply to finalized quiz attempts (not submitted-awaiting-grade, in progress, etc.).
      *
      * @param int $attemptid
