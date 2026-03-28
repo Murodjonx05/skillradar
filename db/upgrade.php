@@ -281,13 +281,18 @@ function xmldb_local_skillradar_upgrade_fk_core($dbman): void {
 
     // --- Foreign keys (idempotent: ignore if already present) ---
     $safeadd = static function (xmldb_table $table, xmldb_key $key) use ($dbman): void {
-        if ($dbman->key_exists($table, $key)) {
-            return;
-        }
         try {
             $dbman->add_key($table, $key);
         } catch (\ddl_exception $e) {
-            debugging('local_skillradar FK ' . $table->getName() . '/' . $key->getName() . ': ' . $e->getMessage(), DEBUG_DEVELOPER);
+            $message = (string)$e->getMessage();
+            $normalized = core_text::strtolower($message);
+            $duplicate = strpos($normalized, 'already exists') !== false
+                || strpos($normalized, 'duplicate') !== false
+                || strpos($normalized, 'exists') !== false;
+            debugging('local_skillradar FK ' . $table->getName() . '/' . $key->getName() . ': ' . $message, DEBUG_DEVELOPER);
+            if ($duplicate) {
+                return;
+            }
             throw $e;
         }
     };
