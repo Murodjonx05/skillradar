@@ -253,6 +253,7 @@ class grade_provider {
                 'items' => (int)$record->questions_count,
                 'empty' => false,
                 'placeholder' => false,
+                'synthetic_empty' => false,
                 'earned' => round((float)$record->earned, 5),
                 'maxearned' => round((float)$record->maxearned, 5),
             ];
@@ -298,6 +299,9 @@ class grade_provider {
             if (!empty($row['placeholder'])) {
                 continue;
             }
+            if (!empty($row['synthetic_empty'])) {
+                continue;
+            }
             $sid = (int)$row['key'];
             if ($sid <= 0 || (float)($row['maxearned'] ?? 0) > 1e-6) {
                 continue;
@@ -317,6 +321,9 @@ class grade_provider {
 
         foreach ($rows as $i => $row) {
             if (!empty($row['placeholder'])) {
+                continue;
+            }
+            if (!empty($row['synthetic_empty'])) {
                 continue;
             }
             $sid = (int)$row['key'];
@@ -390,10 +397,11 @@ class grade_provider {
                 'key' => (string)$skillid,
                 'label' => self::axis_label_from_definition($definition, $skillid),
                 'color' => !empty($definition->color) ? $definition->color : self::color_for_skill($skillid),
-                'value' => 0.0,
+                'value' => null,
                 'items' => (int)($usage[$skillid] ?? 0),
                 'empty' => true,
                 'placeholder' => false,
+                'synthetic_empty' => true,
                 'earned' => 0.0,
                 'maxearned' => 0.0,
             ];
@@ -444,6 +452,7 @@ class grade_provider {
                 'items' => (int)$record->questions_count,
                 'empty' => false,
                 'placeholder' => false,
+                'synthetic_empty' => false,
                 'earned' => round((float)$record->earned, 5),
                 'maxearned' => round((float)$record->maxearned, 5),
             ];
@@ -495,10 +504,11 @@ class grade_provider {
                 'key' => (string)$skillid,
                 'label' => self::axis_label_from_definition($definition, $skillid),
                 'color' => !empty($definition->color) ? $definition->color : self::color_for_skill($skillid),
-                'value' => 0.0,
+                'value' => null,
                 'items' => (int)($usage[$skillid] ?? 0),
                 'empty' => true,
                 'placeholder' => false,
+                'synthetic_empty' => true,
                 'earned' => 0.0,
                 'maxearned' => 0.0,
             ];
@@ -697,6 +707,9 @@ class grade_provider {
         $values = $courseavg['values'];
         foreach ($detail as $i => $row) {
             if (!empty($row['placeholder'])) {
+                continue;
+            }
+            if (!empty($row['synthetic_empty'])) {
                 continue;
             }
             if (($values[$i] ?? null) !== null) {

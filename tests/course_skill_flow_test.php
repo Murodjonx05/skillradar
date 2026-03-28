@@ -226,6 +226,8 @@ final class course_skill_flow_test extends \advanced_testcase {
         $this->assertTrue((bool)$bykey['beta']['empty']);
         $this->assertSame(1, (int)$bykey['alpha']['items']);
         $this->assertSame(1, (int)$bykey['beta']['items']);
+        $this->assertNull($bykey['alpha']['value']);
+        $this->assertNull($bykey['beta']['value']);
         $this->assertNull($payload['overall']['percent']);
     }
 
@@ -249,6 +251,8 @@ final class course_skill_flow_test extends \advanced_testcase {
         $this->assertArrayHasKey('beta', $bykey);
         $this->assertTrue((bool)$bykey['alpha']['empty']);
         $this->assertTrue((bool)$bykey['beta']['empty']);
+        $this->assertNull($bykey['alpha']['value']);
+        $this->assertNull($bykey['beta']['value']);
         $this->assertSame(2, count($payload['chart']['labels'] ?? []));
         $this->assertNull($payload['overall']['percent']);
     }

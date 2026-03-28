@@ -84,4 +84,22 @@ final class grade_provider_test extends \advanced_testcase {
         $out = $ref->invoke(null, $detail);
         $this->assertCount(1, $out);
     }
+
+    public function test_gradebook_course_average_fallback_skips_synthetic_empty_rows(): void {
+        $this->resetAfterTest(true);
+        $ref = new \ReflectionMethod(grade_provider::class, 'apply_gradebook_course_average_fallback');
+        $ref->setAccessible(true);
+        $detail = [[
+            'key' => '6',
+            'label' => 't1',
+            'placeholder' => false,
+            'synthetic_empty' => true,
+        ]];
+        $courseavg = [
+            'label' => 'Course average',
+            'values' => [null],
+        ];
+        $result = $ref->invoke(null, 999, $detail, $courseavg);
+        $this->assertNull($result['values'][0]);
+    }
 }
