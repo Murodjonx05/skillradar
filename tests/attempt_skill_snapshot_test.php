@@ -5,9 +5,9 @@ namespace local_skillradar;
 
 defined('MOODLE_INTERNAL') || die();
 
-/**
- * @covers \local_skillradar\attempt_skill_snapshot
- */
+use PHPUnit\Framework\Attributes\CoversClass;
+
+#[CoversClass(attempt_skill_snapshot::class)]
 final class attempt_skill_snapshot_test extends \advanced_testcase {
     public function test_insert_new_is_idempotent_for_same_attempt_and_question(): void {
         global $DB;

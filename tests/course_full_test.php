@@ -11,19 +11,14 @@ require_once($CFG->dirroot . '/mod/quiz/locallib.php');
 
 use mod_quiz\quiz_attempt;
 use mod_quiz\quiz_settings;
+use PHPUnit\Framework\Attributes\CoversClass;
 use question_engine;
 
-/**
- * Integration tests: full course, quizzes, attempts, materialized analytics, payloads.
- *
- * Uses core generators (course, quiz, questions, enrolment) and exercises the main plugin pipeline.
- *
- * @covers \local_skillradar\cache_manager
- * @covers \local_skillradar\attempt_analyzer
- * @covers \local_skillradar\attempt_skill_snapshot
- * @covers \local_skillradar\grade_provider
- * @covers \local_skillradar\hybrid_provider
- */
+#[CoversClass(cache_manager::class)]
+#[CoversClass(attempt_analyzer::class)]
+#[CoversClass(attempt_skill_snapshot::class)]
+#[CoversClass(grade_provider::class)]
+#[CoversClass(hybrid_provider::class)]
 final class course_full_test extends \advanced_testcase {
     /**
      * Two quizzes in one course, tagged skills, finished attempts → DB rows + API payload.

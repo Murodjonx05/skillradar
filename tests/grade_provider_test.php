@@ -5,11 +5,9 @@ namespace local_skillradar;
 
 defined('MOODLE_INTERNAL') || die();
 
-/**
- * Unit tests for local skill radar payloads (second radar).
- *
- * @covers \local_skillradar\grade_provider
- */
+use PHPUnit\Framework\Attributes\CoversClass;
+
+#[CoversClass(grade_provider::class)]
 final class grade_provider_test extends \advanced_testcase {
     public function test_compute_overall_excludes_empty_axes(): void {
         $this->resetAfterTest(true);

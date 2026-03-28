@@ -12,15 +12,12 @@ require_once($CFG->dirroot . '/mod/quiz/lib.php');
 
 use mod_quiz\quiz_attempt;
 use mod_quiz\quiz_settings;
+use PHPUnit\Framework\Attributes\CoversClass;
 use question_engine;
 
-/**
- * Deeper integration: several skills, quiz scope, last attempt, qmap replacement, payload numbers.
- *
- * @covers \local_skillradar\grade_provider
- * @covers \local_skillradar\cache_manager
- * @covers \local_skillradar\manager
- */
+#[CoversClass(grade_provider::class)]
+#[CoversClass(cache_manager::class)]
+#[CoversClass(manager::class)]
 final class course_skill_flow_test extends \advanced_testcase {
     /**
      * One quiz, two questions → two skills at 100%; course + single-quiz payloads agree on that quiz’s row.

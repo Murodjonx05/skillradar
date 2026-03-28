@@ -124,6 +124,34 @@ function local_skillradar_before_http_headers() {
     global $PAGE;
 
     $pageconfig = local_skillradar_get_report_page_config();
+    $path = $PAGE->url->get_path(false);
+    $assetrev = (string)max(
+        @filemtime(__DIR__ . '/js/chart.umd.min.js') ?: 0,
+        @filemtime(__DIR__ . '/js/radar_arc_plugin.js') ?: 0,
+        @filemtime(__DIR__ . '/js/common.js') ?: 0,
+        @filemtime(__DIR__ . '/js/script.js') ?: 0,
+        @filemtime(__DIR__ . '/js/quiz_random_by_skill.js') ?: 0,
+        @filemtime(__DIR__ . '/styles/radar.css') ?: 0
+    );
+
+    if ($path === '/mod/quiz/edit.php') {
+        $cmid = (int)optional_param('cmid', 0, PARAM_INT);
+        if ($cmid > 0) {
+            try {
+                list($course, $cm) = get_course_and_cm_from_cmid($cmid, 'quiz');
+                $modulecontext = context_module::instance((int)$cm->id);
+                $coursecontext = context_course::instance((int)$course->id);
+                if (has_capability('mod/quiz:manage', $modulecontext)
+                        && has_capability('local/skillradar:manage', $coursecontext)
+                        && !empty(\local_skillradar\manager::get_definitions((int)$course->id))) {
+                    $PAGE->requires->js(new moodle_url('/local/skillradar/js/quiz_random_by_skill.js', ['v' => $assetrev]), true);
+                }
+            } catch (\Throwable $e) {
+                debugging('local_skillradar quiz edit button: ' . $e->getMessage(), DEBUG_DEVELOPER);
+            }
+        }
+    }
+
     if (empty($pageconfig['courseid'])) {
         return;
     }
@@ -131,14 +159,6 @@ function local_skillradar_before_http_headers() {
     if (!local_skillradar_should_show_panel((int) $pageconfig['courseid'], $context)) {
         return;
     }
-
-    $assetrev = (string)max(
-        @filemtime(__DIR__ . '/js/chart.umd.min.js') ?: 0,
-        @filemtime(__DIR__ . '/js/radar_arc_plugin.js') ?: 0,
-        @filemtime(__DIR__ . '/js/common.js') ?: 0,
-        @filemtime(__DIR__ . '/js/script.js') ?: 0,
-        @filemtime(__DIR__ . '/styles/radar.css') ?: 0
-    );
     $PAGE->requires->css(new moodle_url('/local/skillradar/styles/radar.css', ['v' => $assetrev]));
     $PAGE->requires->js(new moodle_url('/local/skillradar/js/chart.umd.min.js', ['v' => $assetrev]), true);
     $PAGE->requires->js(new moodle_url('/local/skillradar/js/radar_arc_plugin.js', ['v' => $assetrev]), true);
@@ -236,7 +256,60 @@ function local_skillradar_question_bank_skill_notice_html(): string {
 }
 
 function local_skillradar_before_footer() {
-    return local_skillradar_question_bank_skill_notice_html() . local_skillradar_render_grade_report_panel();
+    return local_skillradar_render_quiz_random_button()
+        . local_skillradar_question_bank_skill_notice_html()
+        . local_skillradar_render_grade_report_panel();
+}
+
+/**
+ * Render entry point for random-by-skill authoring on the quiz edit page.
+ *
+ * @return string
+ */
+function local_skillradar_render_quiz_random_button(): string {
+    global $PAGE;
+
+    if ($PAGE->url->get_path(false) !== '/mod/quiz/edit.php') {
+        return '';
+    }
+
+    $cmid = (int)optional_param('cmid', 0, PARAM_INT);
+    if ($cmid < 1) {
+        return '';
+    }
+
+    try {
+        list($course, $cm) = get_course_and_cm_from_cmid($cmid, 'quiz');
+    } catch (\Throwable $e) {
+        return '';
+    }
+
+    $modulecontext = context_module::instance((int)$cm->id);
+    $coursecontext = context_course::instance((int)$course->id);
+    if (!has_capability('mod/quiz:manage', $modulecontext) || !has_capability('local/skillradar:manage', $coursecontext)) {
+        return '';
+    }
+    if (empty(\local_skillradar\manager::get_definitions((int)$course->id))) {
+        return '';
+    }
+
+    $params = ['cmid' => $cmid];
+    $cat = optional_param('cat', null, PARAM_SEQUENCE);
+    $category = optional_param('category', null, PARAM_SEQUENCE);
+    if (!empty($category)) {
+        $params['category'] = $category;
+    } else if (!empty($cat)) {
+        $params['cat'] = $cat;
+    }
+
+    return html_writer::link(
+        new moodle_url('/local/skillradar/random_by_skill.php', $params),
+        get_string('randomskill_open', 'local_skillradar'),
+        [
+            'id' => 'local-skillradar-random-by-skill-link',
+            'class' => 'btn btn-outline-secondary d-none mt-2',
+        ]
+    );
 }
 
 /**

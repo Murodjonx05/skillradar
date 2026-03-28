@@ -5,12 +5,10 @@ namespace local_skillradar;
 
 defined('MOODLE_INTERNAL') || die();
 
-/**
- * Regression tests for question->skill resolution.
- *
- * @covers \local_skillradar\skill_service
- * @covers \local_skillradar\manager
- */
+use PHPUnit\Framework\Attributes\CoversClass;
+
+#[CoversClass(skill_service::class)]
+#[CoversClass(manager::class)]
 final class skill_service_test extends \advanced_testcase {
     public function test_replace_question_skill_mappings_resets_in_request_resolution_cache(): void {
         global $DB;
