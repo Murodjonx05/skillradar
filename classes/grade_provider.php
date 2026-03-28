@@ -369,16 +369,19 @@ class grade_provider {
      * @return array
      */
     private static function merge_missing_tagged_skills_used_in_quizzes(int $courseid, array $rows): array {
+        $definitions = self::get_definitions_by_id($courseid);
+        if ($definitions === []) {
+            return $rows;
+        }
+
         $usage = [];
         try {
             $usage = manager::get_tagged_skill_question_counts_in_course($courseid);
         } catch (\Throwable $e) {
-            debugging('local_skillradar merge_missing_tagged_skills: ' . $e->getMessage(), DEBUG_DEVELOPER);
-        }
-
-        $definitions = self::get_definitions_by_id($courseid);
-        if ($definitions === []) {
-            return $rows;
+            debugging('local_skillradar merge_missing_tagged_skills: ' . $e->getMessage(), DEBUG_NORMAL);
+            foreach (array_keys($definitions) as $skillid) {
+                $usage[(int)$skillid] = 0;
+            }
         }
 
         $have = [];

@@ -775,14 +775,25 @@ class calculator {
                     gg.timemodified
                FROM {grade_grades} gg
                JOIN (
-                    SELECT itemid, MAX(timemodified) AS maxtimemodified
-                      FROM {grade_grades}
-                     WHERE itemid {$subinsql}
-                       AND rawgrademax > rawgrademin
-                  GROUP BY itemid
+                    SELECT gg1.itemid,
+                           gg1.timemodified,
+                           MAX(gg1.id) AS maxid
+                      FROM {grade_grades} gg1
+                      JOIN (
+                            SELECT itemid, MAX(timemodified) AS maxtimemodified
+                              FROM {grade_grades}
+                             WHERE itemid {$subinsql}
+                               AND rawgrademax > rawgrademin
+                          GROUP BY itemid
+                      ) latesttime
+                        ON latesttime.itemid = gg1.itemid
+                       AND latesttime.maxtimemodified = gg1.timemodified
+                     WHERE gg1.rawgrademax > gg1.rawgrademin
+                  GROUP BY gg1.itemid, gg1.timemodified
                ) latest
                  ON latest.itemid = gg.itemid
-                AND latest.maxtimemodified = gg.timemodified
+                AND latest.timemodified = gg.timemodified
+                AND latest.maxid = gg.id
               WHERE gg.itemid {$outerinsql}
                 AND gg.rawgrademax > gg.rawgrademin
            ORDER BY gg.itemid ASC",

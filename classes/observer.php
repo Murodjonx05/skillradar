@@ -94,7 +94,7 @@ class observer {
             cache_manager::recompute_attempt($attemptid);
         } catch (\Throwable $e) {
             debugging('local_skillradar recompute_attempt failed for attempt ' . $attemptid . ': ' . $e->getMessage(),
-                DEBUG_DEVELOPER, $e);
+                DEBUG_DEVELOPER, $e->getTrace());
         }
     }
 

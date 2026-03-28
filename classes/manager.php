@@ -431,9 +431,10 @@ class manager {
                   FROM {quiz_slots} qs
                   JOIN {question} q ON q.id = qs.questionid
                  WHERE qs.quizid = :quizid
+                   AND q.qtype <> :randomqtype
               ORDER BY q.name ASC, qs.questionid ASC";
 
-        return $DB->get_records_sql($sql, ['quizid' => $quizid]);
+        return $DB->get_records_sql($sql, ['quizid' => $quizid, 'randomqtype' => 'random']);
     }
 
     /**
@@ -526,9 +527,10 @@ class manager {
                   JOIN {quiz} qz ON qz.id = qs.quizid
                   JOIN {question} q ON q.id = qs.questionid
                  WHERE qz.course = :courseid
+                   AND q.qtype <> :randomqtype
               ORDER BY q.name ASC, qs.questionid ASC";
 
-        return $DB->get_records_sql($sql, ['courseid' => $courseid]);
+        return $DB->get_records_sql($sql, ['courseid' => $courseid, 'randomqtype' => 'random']);
     }
 
     /**

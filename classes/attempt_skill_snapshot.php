@@ -59,16 +59,20 @@ class attempt_skill_snapshot {
             if ($qid < 1) {
                 continue;
             }
-            if ($DB->record_exists(self::TABLE, ['attemptid' => $attemptid, 'questionid' => $qid])) {
-                continue;
+            try {
+                $DB->insert_record(self::TABLE, (object)[
+                    'attemptid' => $attemptid,
+                    'questionid' => $qid,
+                    'skillid' => (int)($row['skillid'] ?? 0),
+                    'skillname' => (string)($row['skillname'] ?? ''),
+                    'timecreated' => $now,
+                ]);
+            } catch (\dml_exception $e) {
+                if ($DB->record_exists(self::TABLE, ['attemptid' => $attemptid, 'questionid' => $qid])) {
+                    continue;
+                }
+                throw $e;
             }
-            $DB->insert_record(self::TABLE, (object)[
-                'attemptid' => $attemptid,
-                'questionid' => $qid,
-                'skillid' => (int)$row['skillid'],
-                'skillname' => (string)($row['skillname'] ?? ''),
-                'timecreated' => $now,
-            ]);
         }
     }
 
