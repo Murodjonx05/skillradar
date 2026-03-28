@@ -69,11 +69,6 @@ if ($bankcontextid < 1 && $banks !== []) {
 }
 
 $definitions = \local_skillradar\manager::get_definitions((int)$course->id);
-$pools = \local_skillradar\random_question_manager::get_available_skill_pools((int)$course->id, $bankcontextid);
-$poolbykey = [];
-foreach ($pools as $pool) {
-    $poolbykey[(string)$pool['definition']->skill_key] = $pool;
-}
 
 $errors = [];
 $values = [];
@@ -132,6 +127,12 @@ if (data_submitted() && confirm_sesskey()) {
     }
 }
 
+$pools = \local_skillradar\random_question_manager::get_available_skill_pools((int)$course->id, $bankcontextid);
+$poolbykey = [];
+foreach ($pools as $pool) {
+    $poolbykey[(string)$pool['definition']->skill_key] = $pool;
+}
+
 echo $OUTPUT->header();
 echo $OUTPUT->heading(get_string('randomskill_heading', 'local_skillradar'));
 echo html_writer::div(get_string('randomskill_help', 'local_skillradar'), 'alert alert-info mb-3');
@@ -177,6 +178,9 @@ foreach ($definitions as $definition) {
         'value' => $values[$skillkey] ?? '0',
         'class' => 'form-control',
         'style' => 'max-width: 8rem;',
+        'data-skillkey' => $skillkey,
+        'data-skillname' => format_string($definition->displayname),
+        'data-available' => (string)((int)($pool['questioncount'] ?? 0)),
     ]);
     if (isset($errors[$skillkey])) {
         $input .= html_writer::div($errors[$skillkey], 'text-danger small mt-1');
@@ -189,7 +193,7 @@ foreach ($definitions as $definition) {
     ];
 }
 
-echo '<form method="post" action="' . s($PAGE->url->out(false)) . '">';
+echo '<form method="post" action="' . s($PAGE->url->out(false)) . '" id="random-skill-form">';
 echo '<input type="hidden" name="sesskey" value="' . sesskey() . '" />';
 echo html_writer::start_div('mb-3');
 echo html_writer::tag('label', get_string('randomskill_bank', 'local_skillradar'), ['for' => 'id_bankcontextid', 'class' => 'form-label']);
@@ -202,7 +206,120 @@ echo html_writer::end_div();
 echo html_writer::table($table);
 echo html_writer::tag('button', get_string('randomskill_submit', 'local_skillradar'), [
     'type' => 'submit',
+    'id' => 'id_randomskill_submit',
     'class' => 'btn btn-primary',
 ]);
 echo '</form>';
+
+$messages = [
+    'nonnegative' => get_string('randomskill_error_nonnegative', 'local_skillradar'),
+    'zero' => get_string('randomskill_error_zero', 'local_skillradar'),
+    'shortage' => get_string('randomskill_error_shortage', 'local_skillradar', (object)[
+        'skill' => '__SKILL__',
+        'requested' => '__REQUESTED__',
+        'available' => '__AVAILABLE__',
+    ]),
+];
+$PAGE->requires->js_init_code(
+    '(function() {
+        const form = document.getElementById("random-skill-form");
+        if (!form) {
+            return;
+        }
+
+        const bankSelect = document.getElementById("id_bankcontextid");
+        const submitButton = document.getElementById("id_randomskill_submit");
+        const inputs = Array.from(form.querySelectorAll(\'input[type="number"][data-skillkey]\'));
+        const messages = ' . json_encode($messages) . ';
+
+        function ensureErrorNode(input) {
+            let node = input.parentNode.querySelector(".random-skill-inline-error");
+            if (!node) {
+                node = document.createElement("div");
+                node.className = "text-danger small mt-1 random-skill-inline-error";
+                input.parentNode.appendChild(node);
+            }
+            return node;
+        }
+
+        function setError(input, message) {
+            const node = ensureErrorNode(input);
+            node.textContent = message || "";
+            input.classList.toggle("is-invalid", !!message);
+        }
+
+        function getShortageMessage(skillname, requested, available) {
+            return messages.shortage
+                .replace("__SKILL__", skillname)
+                .replace("__REQUESTED__", String(requested))
+                .replace("__AVAILABLE__", String(available));
+        }
+
+        function validateInput(input) {
+            const raw = String(input.value || "").trim();
+            if (raw === "") {
+                setError(input, "");
+                return {valid: true, count: 0};
+            }
+            if (!/^\\d+$/.test(raw)) {
+                setError(input, messages.nonnegative);
+                return {valid: false, count: 0};
+            }
+
+            const count = Number(raw);
+            const available = Number(input.dataset.available || "0");
+            if (count > available) {
+                setError(input, getShortageMessage(input.dataset.skillname || input.dataset.skillkey || "", count, available));
+                return {valid: false, count: count};
+            }
+
+            setError(input, "");
+            return {valid: true, count: count};
+        }
+
+        function validateForm() {
+            let allValid = true;
+            let total = 0;
+            inputs.forEach((input) => {
+                const result = validateInput(input);
+                total += result.count;
+                if (!result.valid) {
+                    allValid = false;
+                }
+            });
+            submitButton.disabled = !allValid || total < 1;
+        }
+
+        inputs.forEach((input) => {
+            input.addEventListener("input", validateForm);
+            input.addEventListener("change", validateForm);
+        });
+
+        if (bankSelect) {
+            bankSelect.addEventListener("change", function() {
+                const url = new URL(window.location.href);
+                url.searchParams.set("cmid", ' . (int)$cmid . ');
+                url.searchParams.set("bankcontextid", bankSelect.value);
+                inputs.forEach((input) => {
+                    const value = String(input.value || "").trim();
+                    if (value !== "" && value !== "0") {
+                        url.searchParams.set(input.name, value);
+                    } else {
+                        url.searchParams.delete(input.name);
+                    }
+                });
+                window.location.assign(url.toString());
+            });
+        }
+
+        form.addEventListener("submit", function(event) {
+            validateForm();
+            if (submitButton.disabled) {
+                event.preventDefault();
+            }
+        });
+
+        validateForm();
+    })();'
+);
 echo $OUTPUT->footer();

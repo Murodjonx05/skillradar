@@ -1,0 +1,12 @@
+public ) pwd
+/home/aestra/Рабочий стол/moodle/public
+public ) cd "/home/aestra/Рабочий стол/moodle/public"
+         env PATH="/tmp/phpwrap:$PATH" php-legacy ../vendor/bin/phpunit --configuration ../phpunit.xml \
+               local/skillradar/tests/attempt_skill_snapshot_test.php \
+               local/skillradar/tests/course_skill_flow_test.php \
+               local/skillradar/tests/course_full_test.php \
+               local/skillradar/tests/grade_provider_test.php \
+               local/skillradar/tests/hook_callbacks_test.php \
+               local/skillradar/tests/skill_service_test.php \
+               local/skillradar/tests/random_question_manager_test.php \
+               question/bank/skillradar/tests/skill_condition_test.php
