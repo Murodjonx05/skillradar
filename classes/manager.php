@@ -605,6 +605,78 @@ class manager {
     }
 
     /**
+     * Whether a question belongs to the course context or one of the course's allowed question-bank contexts.
+     *
+     * @param int $courseid
+     * @param int $questionid
+     * @return bool
+     */
+    public static function question_belongs_to_course_scope(int $courseid, int $questionid): bool {
+        global $DB;
+
+        if ($courseid < 1 || $questionid < 1) {
+            return false;
+        }
+
+        $questioncolumns = $DB->get_columns('question');
+        if (isset($questioncolumns['category'])) {
+            $sql = "SELECT qc.contextid
+                      FROM {question} q
+                      JOIN {question_categories} qc ON qc.id = q.category
+                     WHERE q.id = :questionid";
+            $contextid = (int)$DB->get_field_sql($sql, ['questionid' => $questionid]);
+            return self::context_belongs_to_course_scope($courseid, $contextid);
+        }
+
+        $dbman = $DB->get_manager();
+        if ($dbman->table_exists(new \xmldb_table('question_versions')) &&
+                $dbman->table_exists(new \xmldb_table('question_bank_entries'))) {
+            $sql = "SELECT qbe.questioncategoryid
+                      FROM {question_versions} qv
+                      JOIN {question_bank_entries} qbe ON qbe.id = qv.questionbankentryid
+                     WHERE qv.questionid = :questionid";
+            $categoryid = (int)$DB->get_field_sql($sql, ['questionid' => $questionid], IGNORE_MULTIPLE);
+            if ($categoryid < 1) {
+                return false;
+            }
+            $contextid = (int)$DB->get_field('question_categories', 'contextid', ['id' => $categoryid]);
+            return self::context_belongs_to_course_scope($courseid, $contextid);
+        }
+
+        return false;
+    }
+
+    /**
+     * Whether a context is part of the specified course's context tree.
+     *
+     * @param int $courseid
+     * @param int $contextid
+     * @return bool
+     */
+    private static function context_belongs_to_course_scope(int $courseid, int $contextid): bool {
+        if ($courseid < 1 || $contextid < 1) {
+            return false;
+        }
+
+        try {
+            $context = \context::instance_by_id($contextid);
+        } catch (\Throwable $e) {
+            return false;
+        }
+
+        if ($context instanceof \context_course) {
+            return (int)$context->instanceid === $courseid;
+        }
+
+        $coursecontext = $context->get_course_context(false);
+        if (!$coursecontext) {
+            return false;
+        }
+
+        return (int)$coursecontext->instanceid === $courseid;
+    }
+
+    /**
      * Reset process-local caches. Useful for tests and schema transitions.
      *
      * @return void

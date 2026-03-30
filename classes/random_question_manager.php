@@ -15,6 +15,22 @@ use mod_quiz\quiz_settings;
  */
 class random_question_manager {
     /**
+     * Whether a bank context is allowed for random-by-skill operations in this course.
+     *
+     * @param int $courseid
+     * @param int $bankcontextid
+     * @return bool
+     */
+    public static function is_bank_context_allowed_in_course(int $courseid, int $bankcontextid): bool {
+        if ($bankcontextid < 1) {
+            return true;
+        }
+
+        $banks = self::get_available_banks($courseid);
+        return isset($banks[$bankcontextid]);
+    }
+
+    /**
      * Get available explicit question pools for each course skill.
      *
      * Modern Moodle counts distinct question bank entries. Legacy fallback counts distinct question ids.
@@ -226,6 +242,12 @@ class random_question_manager {
         array $skillcounts,
         int $bankcontextid = 0
     ): array {
+        if (!self::is_bank_context_allowed_in_course($courseid, $bankcontextid)) {
+            return [
+                '_form' => get_string('randomskill_error_invalidbank', 'local_skillradar'),
+            ];
+        }
+
         $pools = self::get_available_skill_pools($courseid, $bankcontextid);
         $bykey = [];
         foreach ($pools as $pool) {
@@ -302,6 +324,10 @@ class random_question_manager {
         [$course, $cm] = get_course_and_cm_from_cmid($cmid, 'quiz');
         $quiz = $DB->get_record('quiz', ['id' => $cm->instance], '*', MUST_EXIST);
         $structure = quiz_settings::create($quiz->id)->get_structure();
+
+        if (!self::is_bank_context_allowed_in_course((int)$course->id, $bankcontextid)) {
+            throw new \moodle_exception('randomskill_error_invalidbank', 'local_skillradar');
+        }
 
         $errors = self::validate_skill_quotas_for_quiz((int)$course->id, (int)$quiz->id, $skillcounts, $bankcontextid);
         if ($errors !== []) {

@@ -67,6 +67,14 @@ if ($bankcontextid < 1 && $banks !== []) {
     $firstbank = reset($banks);
     $bankcontextid = (int)$firstbank->contextid;
 }
+if ($bankcontextid > 0 && !isset($banks[$bankcontextid])) {
+    if ($banks !== []) {
+        $firstbank = reset($banks);
+        $bankcontextid = (int)$firstbank->contextid;
+    } else {
+        $bankcontextid = 0;
+    }
+}
 
 $definitions = \local_skillradar\manager::get_definitions((int)$course->id);
 

@@ -107,6 +107,7 @@ $string['randomskill_success'] = 'Added {$a->slots} random slots across {$a->ski
 $string['randomskill_error_nobank'] = 'No usable question bank was found for this quiz.';
 $string['randomskill_error_nonnegative'] = 'Enter a non-negative whole number.';
 $string['randomskill_error_zero'] = 'Enter at least one random question count.';
+$string['randomskill_error_invalidbank'] = 'The selected question bank is not available for this course.';
 $string['randomskill_error_invalidskill'] = 'Unknown skill key: {$a}';
 $string['randomskill_error_nocategory'] = 'Skill "{$a}" has no eligible question bank category.';
 $string['randomskill_error_shortage'] = 'Skill "{$a->skill}" requested {$a->requested} random questions, but only {$a->available} eligible questions are available.';

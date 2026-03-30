@@ -85,6 +85,40 @@ final class random_question_manager_test extends \advanced_testcase {
         $this->assertSame(0, (int)$bykey['beta']['questioncount']);
     }
 
+    public function test_validate_skill_quotas_rejects_bank_context_outside_course_allowlist(): void {
+        $this->resetAfterTest(true);
+        manager::reset_static_caches();
+        skill_service::reset_caches();
+
+        $ctx = $this->create_course_with_split_bank_contexts();
+        $other = $this->create_external_bank_context();
+        $errors = random_question_manager::validate_skill_quotas(
+            (int)$ctx['course']->id,
+            ['alpha' => 1],
+            (int)$other['bankcontextid']
+        );
+
+        $this->assertArrayHasKey('_form', $errors);
+    }
+
+    public function test_add_random_questions_to_quiz_rejects_bank_context_outside_course_allowlist(): void {
+        $this->resetAfterTest(true);
+        manager::reset_static_caches();
+        skill_service::reset_caches();
+
+        $ctx = $this->create_quiz_with_skill_pools();
+        $other = $this->create_external_bank_context();
+
+        $this->expectException(\moodle_exception::class);
+        $this->expectExceptionMessage(get_string('randomskill_error_invalidbank', 'local_skillradar'));
+        random_question_manager::add_random_questions_to_quiz(
+            (int)$ctx['cm']->id,
+            ['alpha' => 1],
+            0,
+            (int)$other['bankcontextid']
+        );
+    }
+
     public function test_add_random_questions_to_quiz_creates_expected_slots_and_filters(): void {
         global $DB;
 
@@ -420,6 +454,26 @@ final class random_question_manager_test extends \advanced_testcase {
             ['questionid' => (int)$bankalpha->id, 'skill_key' => 'alpha'],
             ['questionid' => (int)$quizbeta->id, 'skill_key' => 'beta'],
         ]);
+
+        return [
+            'course' => $course,
+            'bankcontextid' => (int)$bankcontext->id,
+            'quizalpha' => $quizalpha,
+            'bankalpha' => $bankalpha,
+            'quizbeta' => $quizbeta,
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function create_external_bank_context(): array {
+        $generator = $this->getDataGenerator();
+        $qbankgenerator = $generator->get_plugin_generator('mod_qbank');
+
+        $course = $generator->create_course();
+        $bank = $qbankgenerator->create_instance(['course' => (int)$course->id]);
+        $bankcontext = \context_module::instance((int)$bank->cmid);
 
         return [
             'course' => $course,

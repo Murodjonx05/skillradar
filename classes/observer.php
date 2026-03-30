@@ -166,6 +166,10 @@ class observer {
             return;
         }
 
+        if (!manager::question_belongs_to_course_scope($courseid, $questionid)) {
+            return;
+        }
+
         $rows = [[
             'questionid' => $questionid,
             'skill_key' => ($skillkey === '' || $skillkey === '_none') ? '' : $skillkey,
